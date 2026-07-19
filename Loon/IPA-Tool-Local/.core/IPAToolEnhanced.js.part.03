@@ -1,0 +1,250 @@
+] = pair.slice(index + 1).trim();
+      });
+    }
+    add(existing);
+    add(normalizeCookieHeader(incoming));
+    return Object.keys(map).map(function (key) { return key + "=" + map[key]; }).join("; ");
+  }
+
+  function parseStoreFront(headers) {
+    var raw = headers && (headers["x-set-apple-store-front"] || headers["x-apple-store-front"]) || "";
+    return String(raw).split(",")[0].split("-")[0].trim();
+  }
+
+  function parsePod(headers) {
+    var raw = headers && (headers.pod || headers["x-apple-pod"] || headers["x-apple-mz-store-pod"]) || "";
+    var match = String(raw).match(/\d+/);
+    return match ? match[0] : "";
+  }
+
+  function appStoreHosts(account) {
+    var hosts = [];
+    var pod = String(account && account.pod || "").trim().replace(/^p/i, "");
+    if (/^\d+$/.test(pod)) hosts.push("p" + pod + "-buy.itunes.apple.com");
+    hosts.push("p25-buy.itunes.apple.com");
+    hosts.push("buy.itunes.apple.com");
+    return hosts.filter(function (host, index) { return hosts.indexOf(host) === index; });
+  }
+
+  function parseBody(request) {
+    var text = request && request.body != null ? String(request.body) : "";
+    if (!text) return {};
+    var type = String((request.headers || {})["Content-Type"] || (request.headers || {})["content-type"] || "");
+    if (type.indexOf("application/json") >= 0 || /^[\[{]/.test(text.trim())) {
+      return safeJsonParse(text, {});
+    }
+    var output = {};
+    text.split("&").forEach(function (pair) {
+      var parts = pair.split("=");
+      if (!parts[0]) return;
+      output[decodeURIComponent(parts.shift().replace(/\+/g, " "))] = decodeURIComponent(parts.join("=").replace(/\+/g, " "));
+    });
+    return output;
+  }
+
+  function commonHeaders(type) {
+    return {
+      "Content-Type": type || "application/json; charset=utf-8",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "Pragma": "no-cache",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Frame-Options": "DENY"
+    };
+  }
+
+  function send(status, body, headers) {
+    var merged = commonHeaders();
+    Object.keys(headers || {}).forEach(function (key) { merged[key] = headers[key]; });
+    $done({ response: { status: status, headers: merged, body: body == null ? "" : body } });
+  }
+
+  function sendJson(status, data) {
+    send(status, JSON.stringify(data), commonHeaders("application/json; charset=utf-8"));
+  }
+
+  function ok(data) {
+    return { success: true, data: data, error: null, timestamp: nowISO() };
+  }
+
+  function fail(error) {
+    var message = error && error.message ? error.message : String(error);
+    return {
+      success: false,
+      data: null,
+      error: message,
+      code: error && error.code ? String(error.code) : "",
+      requiresTwoFactor: !!(error && error.requiresTwoFactor),
+      timestamp: nowISO()
+    };
+  }
+
+  function requireToken(parsed, body, state) {
+    var headers = normalizedHeaders($request.headers || {});
+    var token = headers["x-ipa-local-token"] || parsed.query.token || body.token || "";
+    if (!token || token !== state.localToken) {
+      var error = new Error("本地授权令牌无效，请从 IPA Tool 本地面板重新操作");
+      error.status = 403;
+      throw error;
+    }
+  }
+
+  function currentAccount(state) {
+    var account = state.accounts[state.activeAccount];
+    if (!account) {
+      var noAccountError = new Error("尚未登录 Apple ID，或当前账号会话不存在");
+      noAccountError.code = "NO_ACCOUNT";
+      throw noAccountError;
+    }
+    if (!account.Cookie || !account.dsPersonId) {
+      var incompleteError = new Error("当前账号会话不完整，请重新登录");
+      incompleteError.code = "SESSION_INCOMPLETE";
+      throw incompleteError;
+    }
+    return account;
+  }
+
+  function maskIdentifier(value) {
+    var text = String(value || "");
+    if (!text) return "";
+    if (text.length <= 6) return text.replace(/./g, "•");
+    return new Array(text.length - 5).join("•") + text.slice(-6);
+  }
+
+  function sanitizeAccount(account) {
+    if (!account) return null;
+    return {
+      appleId: account.appleId,
+      displayName: account.displayName || "",
+      storeFront: account.storeFront || "",
+      pod: account.pod || "",
+      dsPersonId: maskIdentifier(account.dsPersonId),
+      loggedInAt: account.loggedInAt || "",
+      lastUsedAt: account.lastUsedAt || "",
+      sessionStatus: account.sessionStatus || (account.Cookie ? "active" : "incomplete"),
+      hasSession: !!(account.Cookie && account.passwordToken && account.dsPersonId),
+      canRefresh: !!account.legacyPassword
+    };
+  }
+
+  function legacyLoginData(account) {
+    if (!account) return null;
+    return {
+      accountInfo: account.accountInfo || { appleId: account.appleId },
+      storeFront: account.storeFront || "",
+      pod: account.pod || "",
+      dsPersonId: account.dsPersonId || "",
+      passwordToken: account.passwordToken || "",
+      Cookie: account.Cookie || ""
+    };
+  }
+
+  function isTwoFactorChallenge(response) {
+    var text = "";
+    try { text = JSON.stringify(response || {}); } catch (_) { text = String(response || ""); }
+    return /MZFinance\.BadLogin\.Configurator_message|验证码|验证代码|安全码|双重|two[ -]?factor|two[ -]?step|verification code|trusted device/i.test(text);
+  }
+
+  function normalizeAppleIdentifier(value) {
+    var identifier = String(value || "").trim().replace(/^＋/, "+");
+    if (/^\+?[0-9\s()\-]+$/.test(identifier)) identifier = identifier.replace(/[\s()\-]/g, "");
+    return identifier;
+  }
+
+  function validateLoginResponse(response, hasCode) {
+    if (!response || typeof response !== "object") throw new Error("Apple 登录响应为空");
+    if (Object.prototype.hasOwnProperty.call(response, "failureType")) {
+      var failureType = String(response.failureType || "未知错误");
+      var customerMessage = String(response.customerMessage || "");
+      var loginError = new Error("登录失败：" + failureType + (customerMessage ? " · " + customerMessage : ""));
+      loginError.code = failureType;
+      loginError.status = 401;
+      if (isTwoFactorChallenge(response)) {
+        loginError.code = "TWO_FACTOR_REQUIRED";
+        loginError.requiresTwoFactor = true;
+        loginError.message = hasCode
+          ? "验证码无效或已过期，请获取新的 6 位验证码后重试；若仍失败，请确认 Apple ID 和密码"
+          : "Apple 返回登录验证挑战，请输入受信任设备上的 6 位验证码；若没有收到验证码，请先确认 Apple ID 和密码";
+      }
+      throw loginError;
+    }
+    if (!response.accountInfo) {
+      throw new Error(String(response.customerMessage || "Apple 登录响应缺少账号信息"));
+    }
+  }
+
+  async function login(state, input) {
+    var appleId = normalizeAppleIdentifier(input.appleId);
+    var password = String(input.password || "");
+    var code = String(input.code || "").replace(/\s/g, "");
+    if (!appleId || !password) throw new Error("Apple ID 和密码不能为空");
+    if (code && !/^\d{6}$/.test(code)) throw new Error("双重认证验证码应为 6 位数字");
+    var requestData = {
+      attempt: code ? 2 : 4,
+      createSession: "true",
+      guid: state.guid,
+      rmp: 0,
+      why: "signIn",
+      appleId: appleId,
+      password: password + code
+    };
+    var response = await applePost(
+      "https://auth.itunes.apple.com/auth/v1/native/fast/?guid=" + encodeURIComponent(state.guid),
+      buildPlist(requestData),
+      {},
+      1
+    );
+    var parsed = parsePlist(response.body);
+    validateLoginResponse(parsed, !!code);
+    var accountInfo = parsed.accountInfo || {};
+    var normalizedAppleId = String(accountInfo.appleId || appleId).toLowerCase();
+    var existing = state.accounts[normalizedAppleId] || {};
+    var displayName = [
+      accountInfo.firstName || accountInfo.address && accountInfo.address.firstName,
+      accountInfo.lastName || accountInfo.address && accountInfo.address.lastName
+    ].filter(Boolean).join(" ");
+    var cookie = mergeCookies(existing.Cookie || "", response.headers["set-cookie"] || "");
+    var storefront = parseStoreFront(response.headers) || existing.storeFront || "";
+    var pod = parsePod(response.headers) || existing.pod || "";
+    var account = {
+      appleId: String(accountInfo.appleId || appleId),
+      displayName: displayName || existing.displayName || String(accountInfo.appleId || appleId),
+      Cookie: cookie,
+      storeFront: storefront,
+      pod: pod,
+      dsPersonId: parsed.dsPersonId || existing.dsPersonId,
+      passwordToken: parsed.passwordToken || existing.passwordToken,
+      accountInfo: accountInfo,
+      loggedInAt: existing.loggedInAt || nowISO(),
+      lastUsedAt: nowISO(),
+      sessionStatus: "active"
+    };
+    if (state.settings.rememberPassword || REMEMBER_PASSWORD) account.legacyPassword = password;
+    state.accounts[normalizedAppleId] = account;
+    state.activeAccount = normalizedAppleId;
+    writeState(state);
+    return sanitizeAccount(account);
+  }
+
+  async function refreshLogin(state) {
+    var account = currentAccount(state);
+    if (!account.legacyPassword) {
+      var refreshError = new Error("未启用“记住密码”，无法自动刷新 Cookie，请重新登录");
+      refreshError.code = "PASSWORD_NOT_STORED";
+      throw refreshError;
+    }
+    return await login(state, { appleId: account.appleId, password: account.legacyPassword, code: "" });
+  }
+
+  function appInfoFailure(parsed) {
+    if (!parsed) throw new Error("应用信息为空");
+    if (Object.prototype.hasOwnProperty.call(parsed, "failureType")) {
+      var type = String(parsed.failureType || "");
+      var message = String(parsed.customerMessage || "");
+      var error;
+      if (type === "2034" || type === "2042") error = new Error("Apple ID 会话已过期，请重新登录（" + type + "）");
+      else if (type === "9610") error = new Error("当前账号尚未取得此应用许可，工具将尝试获取免费许可（9610）");
+      else if (type === "5002") error = new Error("Apple 返回 5002：下载会话、设备序列号或商店节点校验失败，工具将自动修复并重试");
+      else error = new Error("获取应用信息失败：" + type + (message ? " · " + message : ""));
+      error.code = type || "APP_INFO_FAILED";
+      error.custome
