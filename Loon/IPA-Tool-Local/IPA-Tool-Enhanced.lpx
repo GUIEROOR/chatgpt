@@ -19,9 +19,9 @@ max_retry=select,"2","0,1,2,3",tag=网络重试次数,desc=Apple 与版本源请
 debug=switch,false,tag=调试日志,desc=开启后在 Loon 日志中输出路由、重试与错误详情
 
 [Script]
-http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,requires-body=true,timeout=60,tag=IPA 工具箱面板与 API,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
-http-request ^https:\/\/xiaobai\.app(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,timeout=30,tag=原版安装器兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
-generic script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,timeout=10,tag=打开 IPA 工具箱面板,img-url=shippingbox.fill,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,requires-body=true,timeout=60,tag=IPA 工具箱面板与 API,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+http-request ^https:\/\/xiaobai\.app(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,timeout=30,tag=原版安装器兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+generic script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,timeout=10,tag=打开 IPA 工具箱面板,img-url=shippingbox.fill,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
 
 [MitM]
 hostname=apple-api.com, xiaobai.app
