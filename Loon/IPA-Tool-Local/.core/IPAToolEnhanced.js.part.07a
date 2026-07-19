@@ -1,0 +1,58 @@
+"twoFactorRow" class="field small hidden"><label>双重认证验证码</label><input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="6 位数字"><div class="sub">输入 Apple 发送到受信任设备的验证码</div></div>
+        </div>
+        <div class="actions"><button id="loginBtn" type="submit">登录并保存会话</button><button id="refreshSessionBtn" class="secondary" type="button">刷新 Cookie</button></div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>搜索应用</h2><div class="sub">支持应用名称、关键词或纯数字 App ID</div></div></div>
+      <form id="searchForm">
+        <div class="row"><div class="field"><label>搜索内容</label><input id="term" required placeholder="例如：微信 / 414478124"></div><div class="field small"><label>商店地区</label><input id="country" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="cn / us / hk"></div></div>
+        <div class="actions"><button id="searchBtn" type="submit">搜索 App Store</button><button id="clearSearchBtn" class="secondary" type="button">清空</button></div>
+      </form>
+      <div id="searchHistory" class="chips"></div>
+    </section>
+
+    <section class="card span2">
+      <div class="card-head"><div><h2>搜索结果</h2><div id="resultSummary" class="sub">搜索后显示应用</div></div></div>
+      <div id="results" class="results"><div class="empty">还没有搜索内容</div></div>
+    </section>
+
+    <section id="versionCard" class="card span2 hidden">
+      <div class="card-head"><div><h2 id="versionTitle">历史版本</h2><div id="versionInfo" class="sub"></div></div><button id="closeVersions" class="ghost" type="button">关闭</button></div>
+      <div class="version-tools"><input id="versionFilter" placeholder="筛选版本号或 External ID"><button id="forceVersions" class="secondary smallbtn" type="button">强制刷新版本源</button></div>
+      <div id="versions" class="versions"></div>
+    </section>
+
+    <section class="card span2">
+      <div class="card-head"><div><h2>本地资料库</h2><div class="sub">收藏、最近搜索和已准备下载记录</div></div><button id="clearHistoryBtn" class="secondary smallbtn" type="button">清空下载记录</button></div>
+      <div class="library"><div><div class="sub" style="margin-bottom:8px">收藏应用</div><div id="favorites" class="list"></div></div><div><div class="sub" style="margin-bottom:8px">最近准备下载</div><div id="downloadHistory" class="list"></div></div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>设置</h2><div class="sub">设置保存在 Loon 的 persistentStore</div></div></div>
+      <form id="settingsForm"><div class="row"><div class="field"><label>默认地区</label><input id="settingCountry" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="cn / us / hk"></div><div class="field"><label>版本缓存小时</label><input id="cacheHours" type="number" min="1" max="168"></div></div><div class="actions"><button type="submit">保存设置</button><button id="clearCacheBtn" class="secondary" type="button">清空版本缓存</button></div></form>
+      <div id="modeInfo" class="sub" style="margin-top:12px"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>网络自检</h2><div class="sub">检测搜索接口、版本源和本地会话</div></div><button id="diagnoseBtn" class="secondary smallbtn" type="button">开始检测</button></div>
+      <div id="diagnostics" class="diag"><div class="empty">尚未检测</div></div>
+    </section>
+  </div>
+  <div class="foot">版本 <span id="buildVersion"></span> · 面板地址 apple-api.com/ipa-tool<br>仅用于下载你本人 Apple ID 已合法取得许可的应用。Loon 无通用 ZIP 写入 API，因此不会自动向 IPA 注入 metadata 与 sinf。</div>
+</main>
+
+<div id="downloadModal" class="modal" aria-hidden="true"><section class="sheet"><div class="sheet-head"><div id="sheetApp" class="sheet-app"></div><button id="closeModal" class="ghost" type="button">关闭</button></div><div id="sheetDetails" class="detail-grid"></div><a id="downloadLink" class="btn download-primary" href="#">开始原速下载</a><div class="actions"><button id="copyUrlBtn" class="secondary" type="button">复制 Apple CDN 地址</button><a id="metadataLink" class="btn secondary" href="#">导出 metadata</a><a id="sinfLink" class="btn secondary" href="#">导出 sinf</a></div><div class="notice">点击“开始原速下载”后会直接跳转到 Apple CDN。下载速度由 Apple 节点、当前网络、代理策略和系统后台状态决定。</div></section></div>
+
+<script>
+const TOKEN=${tokenJson};
+const BUILD=${versionJson};
+const DEFAULT_COUNTRY=${countryJson};
+const DEFAULT_COMPAT=${compatJson};
+const DEFAULT_REMEMBER=${rememberJson};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const model={status:null,currentApp:null,versions:[],prepared:null};
+function showStatus(text,type){const el=$('#statusbar');el.textContent=text;el.className='statusbar show '+(type||'');clearTimeout(showStatus.timer);showStatus.timer=setTimeout(()=>el.classList.remove('show'),5000)}
+async function api(path,opt
