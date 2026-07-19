@@ -1,6 +1,6 @@
 #!name=IPA 工具箱增强版
 #!desc=兼容原版 IPA 工具箱助手，并增加 Loon 本地持久化面板、多账号、收藏、历史版本缓存、网络诊断与 Apple CDN 直连下载。
-#!openUrl=http://ipa-tool.local/
+#!openUrl=https://apple-api.com/ipa-tool
 #!author=GUIEROOR / ChatGPT
 #!tag=功能增强,IPA,本地工具
 #!system=iOS,iPadOS
@@ -8,7 +8,7 @@
 #!loon_version=3.4.0(962)
 #!homepage=https://github.com/GUIEROOR/chatgpt/tree/main/Loon/IPA-Tool-Local
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/Other_icon/120px/IPATool.png
-#!date=2026-07-19 15:30:00
+#!date=2026-07-19 16:20:00
 
 [Argument]
 default_country=input,"us",tag=默认商店地区,desc=两位国家或地区代码，例如 us、cn、hk、jp
@@ -18,15 +18,8 @@ remember_password=switch,false,tag=允许自动刷新登录,desc=开启后会把
 max_retry=select,"2","0,1,2,3",tag=网络重试次数,desc=Apple 与版本源请求失败时的重试次数；最后一次会自动回退 HTTP/1.1
 debug=switch,false,tag=调试日志,desc=开启后在 Loon 日志中输出路由、重试与错误详情
 
-[Rule]
-DOMAIN,ipa-tool.local,DIRECT
-
-[Host]
-ipa-tool.local=198.18.0.1
-
 [Script]
-http-request ^http:\/\/ipa-tool\.local(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,requires-body=true,timeout=60,tag=IPA 工具箱本地面板,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
-http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,requires-body=true,timeout=60,tag=原版 App Store API 兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,requires-body=true,timeout=60,tag=IPA 工具箱面板与 API,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
 http-request ^https:\/\/xiaobai\.app(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,timeout=30,tag=原版安装器兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
 generic script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js,timeout=10,tag=打开 IPA 工具箱面板,img-url=shippingbox.fill,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
 
