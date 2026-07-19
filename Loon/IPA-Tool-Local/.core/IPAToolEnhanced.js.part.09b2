@@ -1,0 +1,55 @@
+ows.findIndex(function (item) { return String(item[0]) === startId; });
+        if (index < 0) index = 0;
+        if (direction === "prev") index = Math.max(0, index - count);
+        rows = rows.slice(index, index + count);
+      }
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        appId: versionsMatch[1], data: rows, total: full.total,
+        direction: direction, count: count, appVerId: startId || undefined,
+        source: full.source, cached: full.cached
+      }));
+    }
+
+    var purchaseMatch = path.match(/^\/apps\/(\d+)\/purchase$/);
+    if (method === "POST" && purchaseMatch) {
+      var purchaseResult = await purchaseApp(state, purchaseMatch[1]);
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        appId: purchaseMatch[1], message: "购买请求已提交", purchaseResult: purchaseResult
+      }, "购买请求已提交"));
+    }
+
+    var appMatch = path.match(/^\/apps\/(\d+)$/);
+    if (method === "GET" && appMatch) {
+      var appInfo = await getAppInfo(state, appMatch[1], parsed.query.appVerId || "");
+      return sendCompatibilityJson(200, compatibilityResponse(true, { appId: appMatch[1], appInfo: legacyAppInfo(appInfo) }));
+    }
+
+    var missing = new Error("兼容 API 未实现：" + method + " " + path);
+    missing.status = 404;
+    throw missing;
+  }
+
+  function sortedAccounts(state) {
+    return Object.keys(state.accounts || {}).map(function (key) { return sanitizeAccount(state.accounts[key]); }).sort(function (a, b) {
+      return (Date.parse(b.lastUsedAt || 0) || 0) - (Date.parse(a.lastUsedAt || 0) || 0);
+    });
+  }
+
+  function sortedFavorites(state) {
+    return Object.keys(state.favorites || {}).map(function (key) { return state.favorites[key]; }).sort(function (a, b) {
+      return (Date.parse(b.addedAt || 0) || 0) - (Date.parse(a.addedAt || 0) || 0);
+    });
+  }
+
+  async function route() {
+    var state = readState();
+    var parsed = parseUrl($request.url);
+    var body = parseBody($request);
+    var path = parsed.path.replace(/\/+$/, "") || "/";
+    var method = String($request.method || "GET").toUpperCase();
+    var host = String(parsed.host || "").toLowerCase();
+    log(method, host, path, parsed.query);
+
+    var isAppleApiHost = host === "apple-api.com" || host === "www.apple-api.com";
+    var isLocalPanelRequest = isAppleApiHost && (path === "/ipa-tool" || path === "/favicon.ico" || path.indexOf("/api/") === 0);
+    if (isAppleApiHost && !isLocalPanelRequ
