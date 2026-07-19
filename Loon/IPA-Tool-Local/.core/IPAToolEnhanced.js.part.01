@@ -1,0 +1,233 @@
+/*
+ * IPA Tool Local for Loon
+ * Local-only control panel + persistent App Store session/cache service.
+ *
+ * Important limitation:
+ * Loon exposes HTTP and string persistence APIs, but not a general file/ZIP
+ * writer. This script can obtain the Apple CDN URL and export metadata/sinf,
+ * but cannot inject iTunesMetadata.plist and SC_Info/sinf into the downloaded
+ * archive. Use only with apps associated with your own Apple ID.
+ */
+
+(function () {
+  "use strict";
+
+  var APP_VERSION = "2.0.5";
+  var BASE_ORIGIN = "https://apple-api.com/ipa-tool";
+  var STORE_KEY = "ipa.tool.local.state.v2";
+  var LEGACY_STORE_KEY = "ipa.tool.local.state.v1";
+  var BACKUP_KEY = "ipa.tool.local.state.v2.backup";
+  var USER_AGENT = "Configurator/2.15 (Macintosh; OS X 11.0.0; 16G29) AppleWebKit/2603.3.8";
+  var DEFAULT_TIMEOUT = 16000;
+  var MAX_CACHE_APPS = 40;
+  var MAX_SEARCH_HISTORY = 20;
+  var MAX_DOWNLOAD_HISTORY = 30;
+  var MAX_FAVORITES = 50;
+  var args = typeof $argument === "object" && $argument ? $argument : {};
+  var DEBUG = String(args.debug || "false") === "true";
+  var COMPAT_MODE = String(args.compat_mode == null ? "true" : args.compat_mode) === "true";
+  var REMEMBER_PASSWORD = String(args.remember_password || "false") === "true";
+  var ARG_MAX_RETRY = Math.max(0, Math.min(3, parseInt(String(args.max_retry || "2"), 10) || 0));
+
+  function log() {
+    if (!DEBUG || typeof console === "undefined") return;
+    var values = Array.prototype.slice.call(arguments);
+    values.unshift("[IPA Tool Enhanced]");
+    console.log.apply(console, values);
+  }
+
+  function nowISO() {
+    return new Date().toISOString();
+  }
+
+  function randomHex(length) {
+    var output = "";
+    for (var i = 0; i < length; i += 1) {
+      output += Math.floor(Math.random() * 16).toString(16);
+    }
+    return output.toUpperCase();
+  }
+
+  function normalizeCountry(value, fallback) {
+    var raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+    var aliases = {
+      zh: "cn", "zh-cn": "cn", "cn-zh": "cn", "中国": "cn", "中国大陆": "cn", china: "cn", mainland: "cn",
+      "zh-hans": "cn", hk: "hk", "zh-hk": "hk", "香港": "hk", mo: "mo", "zh-mo": "mo", "澳门": "mo",
+      tw: "tw", "zh-tw": "tw", "zh-hant": "tw", "台湾": "tw", "臺灣": "tw", us: "us", "en-us": "us", "美国": "us",
+      jp: "jp", "ja-jp": "jp", "日本": "jp", kr: "kr", "ko-kr": "kr", "韩国": "kr", sg: "sg", "新加坡": "sg"
+    };
+    if (aliases[raw]) return aliases[raw];
+    if (/^[a-z]{2}$/.test(raw)) return raw;
+    var safeFallback = String(fallback || "us").trim().toLowerCase();
+    return /^[a-z]{2}$/.test(safeFallback) ? safeFallback : "us";
+  }
+
+  function defaultState() {
+    var country = normalizeCountry(args.default_country, "us");
+    var cacheHours = parseInt(String(args.cache_hours || "24"), 10);
+    if (!isFinite(cacheHours) || cacheHours < 1) cacheHours = 24;
+    return {
+      schema: 2,
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      guid: randomHex(12),
+      localToken: randomHex(40),
+      activeAccount: "",
+      accounts: {},
+      settings: {
+        country: country,
+        cacheHours: Math.min(cacheHours, 168),
+        compatMode: COMPAT_MODE,
+        rememberPassword: REMEMBER_PASSWORD,
+        maxRetry: ARG_MAX_RETRY
+      },
+      versionCache: {},
+      searchHistory: [],
+      favorites: {},
+      downloadHistory: [],
+      diagnostics: { lastRunAt: "", results: [] }
+    };
+  }
+
+  function migrateState(state) {
+    var dirty = false;
+    if (!state || typeof state !== "object") return { state: defaultState(), dirty: true };
+    if (!state.schema || state.schema < 2) { state.schema = 2; dirty = true; }
+    if (!state.guid) { state.guid = randomHex(12); dirty = true; }
+    if (!state.localToken) { state.localToken = randomHex(40); dirty = true; }
+    if (!state.accounts || typeof state.accounts !== "object") { state.accounts = {}; dirty = true; }
+    if (!state.settings || typeof state.settings !== "object") { state.settings = {}; dirty = true; }
+    if (!state.versionCache || typeof state.versionCache !== "object") { state.versionCache = {}; dirty = true; }
+    if (!Array.isArray(state.searchHistory)) { state.searchHistory = []; dirty = true; }
+    if (!state.favorites || typeof state.favorites !== "object") { state.favorites = {}; dirty = true; }
+    if (!Array.isArray(state.downloadHistory)) { state.downloadHistory = []; dirty = true; }
+    if (!state.diagnostics || typeof state.diagnostics !== "object") { state.diagnostics = { lastRunAt: "", results: [] }; dirty = true; }
+    var normalizedStoredCountry = normalizeCountry(state.settings.country, "us");
+    if (state.settings.country !== normalizedStoredCountry) { state.settings.country = normalizedStoredCountry; dirty = true; }
+    if (!state.settings.cacheHours) { state.settings.cacheHours = 24; dirty = true; }
+    if (state.settings.compatMode == null) { state.settings.compatMode = COMPAT_MODE; dirty = true; }
+    if (state.settings.rememberPassword == null) { state.settings.rememberPassword = REMEMBER_PASSWORD; dirty = true; }
+    if (state.settings.maxRetry == null) { state.settings.maxRetry = ARG_MAX_RETRY; dirty = true; }
+    Object.keys(state.accounts).forEach(function (key) {
+      var account = state.accounts[key];
+      if (!account || typeof account !== "object") return;
+      if (!account.sessionStatus) { account.sessionStatus = account.Cookie ? "active" : "incomplete"; dirty = true; }
+      if (!state.settings.rememberPassword && account.legacyPassword) { delete account.legacyPassword; dirty = true; }
+    });
+    return { state: state, dirty: dirty };
+  }
+
+  function readState() {
+    var raw = $persistentStore.read(STORE_KEY);
+    var legacy = false;
+    if (!raw) {
+      raw = $persistentStore.read(LEGACY_STORE_KEY);
+      legacy = !!raw;
+    }
+    var state;
+    var dirty = !raw || legacy;
+    try {
+      state = raw ? JSON.parse(raw) : defaultState();
+    } catch (error) {
+      var backupRaw = $persistentStore.read(BACKUP_KEY);
+      try {
+        state = backupRaw ? JSON.parse(backupRaw) : defaultState();
+      } catch (backupError) {
+        state = defaultState();
+      }
+      dirty = true;
+    }
+    var migrated = migrateState(state);
+    state = migrated.state;
+    dirty = dirty || migrated.dirty;
+    if (dirty && !$persistentStore.write(JSON.stringify(state), STORE_KEY)) {
+      throw new Error("无法初始化 Loon 本地持久化存储");
+    }
+    return state;
+  }
+
+  function trimCache(state) {
+    var keys = Object.keys(state.versionCache || {});
+    if (keys.length > MAX_CACHE_APPS) {
+      keys.sort(function (a, b) {
+        var at = Date.parse((state.versionCache[a] || {}).updatedAt || 0) || 0;
+        var bt = Date.parse((state.versionCache[b] || {}).updatedAt || 0) || 0;
+        return bt - at;
+      });
+      keys.slice(MAX_CACHE_APPS).forEach(function (key) {
+        delete state.versionCache[key];
+      });
+    }
+    state.searchHistory = (state.searchHistory || []).slice(0, MAX_SEARCH_HISTORY);
+    state.downloadHistory = (state.downloadHistory || []).slice(0, MAX_DOWNLOAD_HISTORY);
+    var favoriteKeys = Object.keys(state.favorites || {});
+    if (favoriteKeys.length > MAX_FAVORITES) {
+      favoriteKeys.sort(function (a, b) {
+        return (Date.parse((state.favorites[b] || {}).addedAt || 0) || 0) - (Date.parse((state.favorites[a] || {}).addedAt || 0) || 0);
+      });
+      favoriteKeys.slice(MAX_FAVORITES).forEach(function (key) { delete state.favorites[key]; });
+    }
+  }
+
+  function writeState(state) {
+    state.updatedAt = nowISO();
+    trimCache(state);
+    var currentRaw = $persistentStore.read(STORE_KEY);
+    if (currentRaw) $persistentStore.write(currentRaw, BACKUP_KEY);
+    var ok = $persistentStore.write(JSON.stringify(state), STORE_KEY);
+    if (!ok) throw new Error("本地持久化写入失败，可能已达到 Loon 存储限制");
+    return state;
+  }
+
+  function safeJsonParse(value, fallback) {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      return fallback;
+    }
+  }
+
+  function escapeXml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function decodeXml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, function (_, code) { return String.fromCharCode(parseInt(code, 10)); })
+      .replace(/&#x([0-9a-f]+);/gi, function (_, code) { return String.fromCharCode(parseInt(code, 16)); })
+      .replace(/&amp;/g, "&");
+  }
+
+  function PlistData(base64) {
+    this.__plistData = String(base64 || "").replace(/\s/g, "");
+  }
+
+  function plistValue(value, depth) {
+    var indent = new Array(depth + 1).join("  ");
+    var nextIndent = new Array(depth + 2).join("  ");
+    if (value instanceof PlistData || (value && typeof value === "object" && value.__plistData != null)) {
+      return indent + "<data>" + String(value.__plistData || "").replace(/\s/g, "") + "</data>";
+    }
+    if (value === true) return indent + "<true/>";
+    if (value === false) return indent + "<false/>";
+    if (value == null) return indent + "<string></string>";
+    if (Object.prototype.toString.call(value) === "[object Date]") {
+      return indent + "<date>" + value.toISOString() + "</date>";
+    }
+    if (typeof value === "number") {
+      if (Math.floor(value) === value) return indent + "<integer>" + String(value) + "</integer>";
+      return indent + "<real>" + String(value) + "</real>";
+    }
+    if (Array.isArray(value)) {
+      if (!value.length) return indent + "<array/>";
+      return indent + "<array>\n" + value.map(function (item) {
+        return plistValue(item, dept
