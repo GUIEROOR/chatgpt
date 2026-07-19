@@ -1,0 +1,230 @@
+rMessage = message;
+      throw error;
+    }
+    if (!parsed.songList || !parsed.songList.length) throw new Error("这个应用或版本没有可下载信息");
+  }
+
+  async function requestAppInfoOnce(state, account, appId, externalVersionId, host) {
+    var data = {
+      creditDisplay: "",
+      guid: state.guid,
+      salableAdamId: Number(appId),
+      serialNumber: "0"
+    };
+    if (externalVersionId != null && String(externalVersionId) !== "") data.externalVersionId = String(externalVersionId);
+    var response = await applePost(
+      "https://" + host + "/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct?guid=" + encodeURIComponent(state.guid),
+      buildPlist(data),
+      {
+        "Content-Type": "application/x-apple-plist",
+        "Cookie": String(account.Cookie || ""),
+        "X-Token": String(account.passwordToken || ""),
+        "X-Dsid": String(account.dsPersonId || ""),
+        "iCloud-DSID": String(account.dsPersonId || ""),
+        "X-Apple-Store-Front": String(account.storeFront || "")
+      },
+      Math.max(1, Number(state.settings.maxRetry || ARG_MAX_RETRY))
+    );
+    account.Cookie = mergeCookies(account.Cookie || "", response.headers["set-cookie"] || "");
+    var responsePod = parsePod(response.headers);
+    if (responsePod) account.pod = responsePod;
+    return { parsed: parsePlist(response.body), response: response, host: host };
+  }
+
+  async function getAppInfo(state, appId, externalVersionId, allowRefresh, recovery) {
+    var account = currentAccount(state);
+    var policy = recovery || { unknownRetries: 2, purchaseTried: false, refreshTried: false };
+    if (policy.unknownRetries == null) policy.unknownRetries = 2;
+    var hosts = appStoreHosts(account);
+    var lastError = null;
+    var parsed = null;
+
+    for (var hostIndex = 0; hostIndex < hosts.length; hostIndex += 1) {
+      try {
+        var result = await requestAppInfoOnce(state, account, appId, externalVersionId, hosts[hostIndex]);
+        parsed = result.parsed;
+        appInfoFailure(parsed);
+        if (!parsePod(result.response.headers)) {
+          var successfulHostPod = String(result.host || "").match(/^p(\d+)-buy\./i);
+          if (successfulHostPod) account.pod = successfulHostPod[1];
+        }
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (!error || error.code !== "5002") break;
+      }
+    }
+
+    if (lastError) {
+      var code = String(lastError.code || "");
+      if ((code === "2034" || code === "2042") && allowRefresh !== false && !policy.refreshTried && account.legacyPassword) {
+        account.sessionStatus = "expired";
+        writeState(state);
+        policy.refreshTried = true;
+        await refreshLogin(state);
+        return await getAppInfo(state, appId, externalVersionId, false, policy);
+      }
+
+      if ((code === "9610" || code === "5002") && !policy.purchaseTried) {
+        policy.purchaseTried = true;
+        try {
+          await purchaseApp(state, appId, { recovery: true });
+        } catch (purchaseError) {
+          log("许可恢复未完成", String(purchaseError && purchaseError.message || purchaseError));
+        }
+        await sleep(650);
+        return await getAppInfo(state, appId, externalVersionId, allowRefresh, policy);
+      }
+
+      if (code === "5002" && policy.unknownRetries > 0) {
+        var wait = policy.unknownRetries === 2 ? 900 : 1800;
+        policy.unknownRetries -= 1;
+        await sleep(wait);
+        return await getAppInfo(state, appId, externalVersionId, allowRefresh, policy);
+      }
+
+      if (code === "5002") {
+        lastError.message = "Apple 仍返回 5002。已尝试 serialNumber=0、X-Token、StoreFront、Pod 节点、许可恢复和重试；请先点“刷新 Cookie”或重新登录后再试";
+      }
+      if (code === "2034" || code === "2042") {
+        account.sessionStatus = "expired";
+        writeState(state);
+      }
+      throw lastError;
+    }
+
+    var song = parsed.songList[0] || {};
+    var metadata = song.metadata || {};
+    metadata.appleId = account.appleId;
+    var artwork = song["artwork-urls"] && song["artwork-urls"].default || {};
+    var asset = song["asset-info"] || {};
+    var sinfs = song.sinfs || [];
+    var sinfValue = sinfs[0] && sinfs[0].sinf;
+    var sinfBase64 = sinfValue && sinfValue.__plistData != null ? sinfValue.__plistData : String(sinfValue || "").replace(/\s/g, "");
+    account.lastUsedAt = nowISO();
+    account.sessionStatus = "active";
+    writeState(state);
+    return {
+      name: metadata.bundleDisplayName || metadata.itemName || "Unknown App",
+      appId: song.songId || Number(appId),
+      url: song.URL || "",
+      icon: artwork.url || song.artworkURL || "",
+      sinfBase64: sinfBase64,
+      bundleId: metadata.softwareVersionBundleId || "",
+      displayVersion: metadata.bundleShortVersionString || "",
+      buildVersion: metadata.bundleVersion || "",
+      externalVersionId: metadata.softwareVersionExternalIdentifier || externalVersionId || "",
+      externalVersionIdList: metadata.softwareVersionExternalIdentifiers || [],
+      fileSize: Number(asset["file-size"] || song.uncompressedSize || 0),
+      metadataObject: metadata,
+      metadataPlist: buildPlist(metadata),
+      minimumOsVersion: String(metadata.rating && metadata.rating.label || metadata.minimumOSVersion || "").replace("+", ""),
+      currency: parsed.metrics && parsed.metrics.currency || "",
+      account: account.appleId
+    };
+  }
+
+  function addSearchHistory(state, term, country) {
+    var normalized = String(term || "").trim();
+    if (!normalized) return;
+    state.searchHistory = (state.searchHistory || []).filter(function (item) {
+      return String(item.term || "").toLowerCase() !== normalized.toLowerCase() || String(item.country || "") !== String(country || "");
+    });
+    state.searchHistory.unshift({ term: normalized, country: country, searchedAt: nowISO() });
+    writeState(state);
+  }
+
+  function addDownloadHistory(state, info, source) {
+    var entry = {
+      appId: String(info.appId || ""),
+      name: info.name || "Unknown App",
+      bundleId: info.bundleId || "",
+      displayVersion: info.displayVersion || "",
+      externalVersionId: String(info.externalVersionId || ""),
+      fileSize: Number(info.fileSize || 0),
+      icon: info.icon || "",
+      account: info.account || "",
+      source: source || "panel",
+      preparedAt: nowISO()
+    };
+    state.downloadHistory = (state.downloadHistory || []).filter(function (item) {
+      return !(String(item.appId) === entry.appId && String(item.externalVersionId) === entry.externalVersionId && String(item.account) === entry.account);
+    });
+    state.downloadHistory.unshift(entry);
+    writeState(state);
+    return entry;
+  }
+
+  async function purchaseApp(state, appId, options) {
+    var account = currentAccount(state);
+    var requestData = {
+      appExtVrsId: "0",
+      buyWithoutAuthorization: "true",
+      guid: state.guid,
+      hasAskedToFulfillPreorder: "true",
+      hasDoneAgeCheck: "true",
+      hasConfirmedPaymentSheet: "true",
+      needDiv: "0",
+      origPage: "Software-" + String(appId),
+      origPageLocation: "Buy",
+      price: "0",
+      pricingParameters: "STDQ",
+      productType: "C",
+      salableAdamId: String(appId)
+    };
+    var hosts = appStoreHosts(account);
+    var lastError = null;
+    for (var i = 0; i < hosts.length; i += 1) {
+      var response;
+      try {
+        response = await applePost(
+          "https://" + hosts[i] + "/WebObjects/MZFinance.woa/wa/buyProduct?guid=" + encodeURIComponent(state.guid),
+          buildPlist(requestData),
+          {
+            "Content-Type": "application/x-apple-plist",
+            "Cookie": String(account.Cookie || ""),
+            "X-Token": String(account.passwordToken || ""),
+            "X-Dsid": String(account.dsPersonId || ""),
+            "iCloud-DSID": String(account.dsPersonId || ""),
+            "X-Apple-Store-Front": String(account.storeFront || "")
+          },
+          0
+        );
+      } catch (httpError) {
+        var httpBody = httpError && httpError.response && httpError.response.body;
+        var httpParsed = httpBody ? parsePlist(httpBody) : null;
+        var httpText = String(httpParsed && httpParsed.customerMessage || "").toLowerCase();
+        if (Number(httpError && httpError.status) === 500 && (String(httpParsed && httpParsed.failureType || "") === "5002" || /already (has a license|purchased)|已购买/.test(httpText))) {
+          account.lastUsedAt = nowISO();
+          writeState(state);
+          return { appId: String(appId), submitted: true, alreadyOwned: true };
+        }
+        lastError = httpError;
+        continue;
+      }
+      account.Cookie = mergeCookies(account.Cookie || "", response.headers["set-cookie"] || "");
+      var responsePod = parsePod(response.headers);
+      if (responsePod) account.pod = responsePod;
+      var parsed = parsePlist(response.body);
+      var failureType = parsed && parsed.failureType;
+      var messages = {
+        "5002": "账号已经拥有许可，Apple 返回 5002",
+        "2040": "已购买过，但应用已下架",
+        "2059": "未购买且应用已下架，或当前地区未上架",
+        "1010": "当前商店地区未上架",
+        "2034": "Apple ID 会话已过期",
+        "2042": "Apple ID Cookie 为空或已过期",
+        "2019": "无法通过此接口直接购买付费应用",
+        "9610": "未找到许可，可能从未购买或应用 ID 错误"
+      };
+      if (String(failureType || "") === "5002") {
+        account.lastUsedAt = nowISO();
+        account.sessionStatus = "active";
+        writeState(state);
+        return { appId: String(appId), submitted: true, alreadyOwned: true };
+      }
+      if (failureType || failureType === "") {
+        var purchaseError = new Error("获取许可失败：" + (messages[String(failureType)] || parsed.customerMessage || String(failureType)));
+        purchaseError.code = String(failureType || "PURCHASE_FAILED");
+        if (purchaseError.code === "2034" || purchaseError.code 
