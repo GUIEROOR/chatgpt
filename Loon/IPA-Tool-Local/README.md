@@ -23,6 +23,14 @@ https://apple-api.com/ipa-tool
 
 也可以在 Loon 的脚本页面手动运行“打开 IPA 工具箱面板”，再点击通知。
 
+## 2.0.4 商店地区修复
+
+- App Store Search 的 country 参数必须是国家或地区代码，中文商店应使用 `cn`，而不是语言代码 `zh`。
+- 旧版把设置中的 `zh` 原样发送给 iTunes Search，因此返回 HTTP 400。
+- 2.0.4 会自动将 `zh`、`zh-CN`、`中国`、`中国大陆`、`china` 转为 `cn`。
+- 同时支持香港 `hk`、澳门 `mo`、台湾 `tw`、美国 `us`、日本 `jp`、韩国 `kr`、新加坡 `sg` 等代码。
+- 已保存为 `zh` 的旧设置会在打开面板时自动迁移为 `cn`，搜索框也会同步显示 `cn`。
+
 ## 2.0.3 双重认证修复
 
 - Apple 私有登录接口可能使用 `MZFinance.BadLogin.Configurator_message` 表示需要继续双重认证。
