@@ -1,0 +1,116 @@
+ring(preferred || "").toLowerCase();
+    if (!normalized || normalized === "timbrd") jobs.push(settle(fetchTimbrdVersions(appId), "timbrd"));
+    if (!normalized || normalized === "bilin") jobs.push(settle(fetchBilinVersions(appId), "bilin"));
+    var results = await Promise.all(jobs);
+    var data = mergeVersionSources(results);
+    var sources = results.filter(function (item) { return item.ok; }).map(function (item) { return item.name; });
+    var errors = results.filter(function (item) { return !item.ok; }).map(function (item) {
+      return item.name + "：" + String(item.error && item.error.message || item.error);
+    });
+    return { source: sources.length ? sources.join("+") : "unavailable", data: data, errors: errors };
+  }
+
+  async function getVersions(state, appId, force) {
+    var key = String(appId);
+    var cached = state.versionCache[key];
+    var ttl = Number(state.settings.cacheHours || 24) * 3600000;
+    if (!force && cached && Date.now() - (Date.parse(cached.updatedAt) || 0) < ttl) {
+      return Object.assign({}, cached, { cached: true });
+    }
+
+    var legacyPromise = thirdPartyVersions(appId);
+    var info = null;
+    var officialError = null;
+    try {
+      info = await getAppInfo(state, appId, "", true, { unknownRetries: 0, purchaseTried: false, refreshTried: false });
+    } catch (error) {
+      officialError = error;
+    }
+    var legacy = await legacyPromise;
+    var ids = info && Array.isArray(info.externalVersionIdList) ? info.externalVersionIdList.slice().reverse() : [];
+    if (!ids.length && info && info.externalVersionId) ids = [info.externalVersionId];
+    var seen = {};
+    var official = ids.filter(function (id) {
+      var keyId = String(id);
+      if (seen[keyId]) return false;
+      seen[keyId] = true;
+      return true;
+    }).map(function (id) {
+      return [String(id), info && String(id) === String(info.externalVersionId) ? String(info.displayVersion || "????") : "????", today()];
+    });
+    var labelMap = {};
+    legacy.data.forEach(function (item) { labelMap[String(item[0])] = String(item[1] || "????"); });
+    official.forEach(function (item) {
+      if (labelMap[String(item[0])] && item[1] === "????") item[1] = labelMap[String(item[0])];
+    });
+    if (!official.length && legacy.data.length) official = legacy.data;
+    var errors = (legacy.errors || []).slice();
+    if (officialError) errors.unshift("Apple：" + String(officialError.message || officialError));
+    if (!official.length) {
+      throw new Error(errors.length ? "历史版本读取失败：" + errors.join("；") : "没有找到历史版本");
+    }
+    var source = info ? (legacy.data.length ? "official+" + legacy.source : "official") : legacy.source;
+    var result = {
+      appId: key,
+      data: official,
+      total: official.length,
+      source: source,
+      updatedAt: nowISO(),
+      providerErrors: errors,
+      cached: false
+    };
+    state.versionCache[key] = Object.assign({}, result, { cached: undefined });
+    writeState(state);
+    return result;
+  }
+
+  async function diagnoseEndpoint(name, url) {
+    var started = Date.now();
+    try {
+      var response = await http("get", {
+        url: url,
+        headers: { "User-Agent": "Mozilla/5.0" },
+        timeout: 9000,
+        retries: 0
+      });
+      return { name: name, ok: true, status: response.status, elapsedMs: Date.now() - started };
+    } catch (error) {
+      return { name: name, ok: false, status: error && error.status || 0, elapsedMs: Date.now() - started, error: String(error && error.message || error) };
+    }
+  }
+
+  async function runDiagnostics(state) {
+    var results = await Promise.all([
+      diagnoseEndpoint("iTunes Search", "https://itunes.apple.com/lookup?id=6479691128&country=us"),
+      diagnoseEndpoint("Timbrd 版本源", "https://api.timbrd.com/apple/app-version/index.php?id=414478124"),
+      diagnoseEndpoint("Bilin 版本源", "https://apis.bilin.eu.org/history/414478124")
+    ]);
+    results.unshift({
+      name: "Apple ID 会话",
+      ok: !!(state.activeAccount && state.accounts[state.activeAccount] && state.accounts[state.activeAccount].Cookie),
+      status: 0,
+      elapsedMs: 0,
+      error: state.activeAccount ? "" : "尚未登录"
+    });
+    state.diagnostics = { lastRunAt: nowISO(), results: results };
+    writeState(state);
+    return state.diagnostics;
+  }
+
+  function formatBytes(value) {
+    var bytes = Number(value || 0);
+    if (!isFinite(bytes) || bytes <= 0) return "未知";
+    var units = ["B", "KB", "MB", "GB"];
+    var index = 0;
+    while (bytes >= 1024 && index < units.length - 1) {
+      bytes /= 1024;
+      index += 1;
+    }
+    return bytes.toFixed(index > 1 ? 2 : 0) + " " + units[index];
+  }
+
+  function htmlPage(state) {
+    var tokenJson = JSON.stringify(state.localToken);
+    var versionJson = JSON.stringify(APP_VERSION);
+    var countryJson = JSON.stringify(state.settings.country || "us");
+    var compatJson = JSON.stringif
