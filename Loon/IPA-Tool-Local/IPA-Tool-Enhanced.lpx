@@ -1,5 +1,5 @@
 #!name=IPA 工具箱增强版
-#!desc=兼容原版 IPA 工具箱助手，并增加 Loon 本地持久化面板、多账号、收藏、历史版本缓存、网络诊断与 Apple CDN 直连下载。
+#!desc=IPA 工具箱增强版 2.0.2：支持邮箱与 +86 手机号 Apple ID，双重认证验证码在 Apple 要求后再显示，并提供持久化面板与 Apple CDN 直连下载。
 #!openUrl=https://apple-api.com/ipa-tool
 #!author=GUIEROOR / ChatGPT
 #!tag=功能增强,IPA,本地工具
@@ -8,7 +8,7 @@
 #!loon_version=3.4.0(962)
 #!homepage=https://github.com/GUIEROOR/chatgpt/tree/main/Loon/IPA-Tool-Local
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/Other_icon/120px/IPATool.png
-#!date=2026-07-19 16:20:00
+#!date=2026-07-19 16:45:00
 
 [Argument]
 default_country=input,"us",tag=默认商店地区,desc=两位国家或地区代码，例如 us、cn、hk、jp
