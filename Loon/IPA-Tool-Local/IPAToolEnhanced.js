@@ -2,10 +2,10 @@
 (function () {
   "use strict";
 
-  var LOADER_VERSION = "2.0.3";
+  var LOADER_VERSION = "2.0.4";
   var CORE_VERSION = "2.0.0";
   var CACHE_KEY = "ipa.tool.enhanced.core." + LOADER_VERSION;
-  var LEGACY_CACHE_KEYS = ["ipa.tool.enhanced.core.2.0.2", "ipa.tool.enhanced.core.2.0.1", "ipa.tool.enhanced.core." + CORE_VERSION];
+  var LEGACY_CACHE_KEYS = ["ipa.tool.enhanced.core.2.0.3", "ipa.tool.enhanced.core.2.0.2", "ipa.tool.enhanced.core.2.0.1", "ipa.tool.enhanced.core." + CORE_VERSION];
   var PART_COUNT = 7;
   var EXPECTED_LENGTH = 52232;
   var BASE = "https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/.parts/IPAToolEnhanced.lz64.";
@@ -18,10 +18,25 @@
 
   function patchSource(source) {
     source = String(source || "");
-    source = source.replace(/var APP_VERSION = "2\.0\.[0-3]";/, 'var APP_VERSION = "2.0.3";');
+    source = source.replace(/var APP_VERSION = "2\.0\.[0-4]";/, 'var APP_VERSION = "2.0.4";');
     source = source.replace('var BASE_ORIGIN = "http://ipa-tool.local";', 'var BASE_ORIGIN = "https://apple-api.com/ipa-tool";');
     source = source.replace("本地地址 ipa-tool.local", "面板地址 apple-api.com/ipa-tool");
     source = source.replace('var appleId = String(input.appleId || "").trim();', 'var appleId = String(input.appleId || "").trim().replace(/^＋/, "+"); if (/^[+0-9 ()-]+$/.test(appleId)) appleId = appleId.replace(/[ ()-]/g, "");');
+    if (source.indexOf("function normalizeCountry(value, fallback)") < 0) {
+      source = source.replace('  function defaultState() {\n    var country = String(args.default_country || "us").trim().toLowerCase();\n    if (!/^[a-z]{2}$/.test(country)) country = "us";', '  function normalizeCountry(value, fallback) {\n    var raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");\n    var aliases = { zh: "cn", "zh-cn": "cn", "cn-zh": "cn", "中国": "cn", "中国大陆": "cn", china: "cn", mainland: "cn", "zh-hans": "cn", hk: "hk", "zh-hk": "hk", "香港": "hk", mo: "mo", "zh-mo": "mo", "澳门": "mo", tw: "tw", "zh-tw": "tw", "zh-hant": "tw", "台湾": "tw", "臺灣": "tw", us: "us", "en-us": "us", "美国": "us", jp: "jp", "ja-jp": "jp", "日本": "jp", kr: "kr", "ko-kr": "kr", "韩国": "kr", sg: "sg", "新加坡": "sg" };\n    if (aliases[raw]) return aliases[raw];\n    if (/^[a-z]{2}$/.test(raw)) return raw;\n    var safeFallback = String(fallback || "us").trim().toLowerCase();\n    return /^[a-z]{2}$/.test(safeFallback) ? safeFallback : "us";\n  }\n\n  function defaultState() {\n    var country = normalizeCountry(args.default_country, "us");');
+    }
+    source = source.replace('    if (!state.settings.country) { state.settings.country = "us"; dirty = true; }', '    var normalizedStoredCountry = normalizeCountry(state.settings.country, "us");\n    if (state.settings.country !== normalizedStoredCountry) { state.settings.country = normalizedStoredCountry; dirty = true; }');
+    source = source.replace('  async function searchApps(term, country, limit) {\n    if (!term) throw new Error("请输入应用名称或关键词");', '  async function searchApps(term, country, limit) {\n    if (!term) throw new Error("请输入应用名称或关键词");\n    country = normalizeCountry(country, "us");');
+    source = source.replace('  async function lookupApp(appId, country) {\n    var url =', '  async function lookupApp(appId, country) {\n    country = normalizeCountry(country, "us");\n    var url =');
+    source = source.split('String(parsed.query.country || state.settings.country || "us").toLowerCase()').join('normalizeCountry(parsed.query.country, state.settings.country || "us")');
+    source = source.replace('      var country = String(body.country || state.settings.country || "us").toLowerCase();\n      if (!/^[a-z]{2}$/.test(country)) throw new Error("商店地区必须是两位代码");', '      var country = normalizeCountry(body.country, state.settings.country || "us");');
+    source = source.replace('<input id="country" maxlength="2" autocapitalize="none">', '<input id="country" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="cn / us / hk">');
+    source = source.replace('<input id="settingCountry" maxlength="2">', '<input id="settingCountry" maxlength="12" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="cn / us / hk">');
+    if (source.indexOf('function normalizeCountryInput(value)') < 0) {
+      source = source.replace('function renderSearchHistory(items){', 'function normalizeCountryInput(value){const raw=String(value||" ").trim().toLowerCase().replace(/_/g,"-");const aliases={zh:"cn","zh-cn":"cn","cn-zh":"cn","中国":"cn","中国大陆":"cn",china:"cn",mainland:"cn","zh-hans":"cn",hk:"hk","zh-hk":"hk","香港":"hk",mo:"mo","zh-mo":"mo","澳门":"mo",tw:"tw","zh-tw":"tw","zh-hant":"tw","台湾":"tw","臺灣":"tw",us:"us","en-us":"us","美国":"us",jp:"jp","ja-jp":"jp","日本":"jp",kr:"kr","ko-kr":"kr","韩国":"kr",sg:"sg","新加坡":"sg"};return aliases[raw]||(/^[a-z]{2}$/.test(raw)?raw:"")}\nfunction renderSearchHistory(items){');
+    }
+    source = source.replace("async function search(term,country){term=String(term||'').trim();country=String(country||DEFAULT_COUNTRY).trim().toLowerCase();if(!term)return;", "async function search(term,country){term=String(term||'').trim();const originalCountry=String(country||DEFAULT_COUNTRY).trim();country=normalizeCountryInput(originalCountry)||normalizeCountryInput(DEFAULT_COUNTRY)||'us';$('#country').value=country;if(!term)return;");
+    source = source.replace("$('#settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',{method:'POST',body:{country:$('#settingCountry').value,cacheHours:$('#cacheHours').value}});$('#country').value=$('#settingCountry').value;showStatus('设置已保存','good');refresh()}catch(err){showStatus(err.message,'error')}});", "$('#settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{const country=normalizeCountryInput($('#settingCountry').value);if(!country)throw new Error('请输入有效的商店地区，例如 cn、us、hk；zh 会自动转换为 cn');$('#settingCountry').value=country;await api('/api/settings',{method:'POST',body:{country,cacheHours:$('#cacheHours').value}});$('#country').value=country;showStatus('设置已保存：'+country.toUpperCase(),'good');refresh()}catch(err){showStatus(err.message,'error')}});");
     if (source.indexOf("function isTwoFactorChallenge(response)") < 0) {
       source = source.replace('  function validateLoginResponse(response) {', '  function isTwoFactorChallenge(response) {\n    var text = "";\n    try { text = JSON.stringify(response || {}); } catch (_) { text = String(response || ""); }\n    return /MZFinance\\.BadLogin\\.Configurator_message|验证码|验证代码|安全码|双重|two[ -]?factor|two[ -]?step|verification code|trusted device/i.test(text);\n  }\n\n  function validateLoginResponse(response, hasCode) {');
     } else {
@@ -39,7 +54,7 @@
     var oldHandler = "$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();showStatus('正在登录 Apple ID…');try{const a=await api('/api/login',{method:'POST',body:{appleId:$('#appleId').value,password:$('#password').value,code:$('#code').value}});$('#password').value='';$('#code').value='';showStatus('登录成功：'+a.appleId,'good');refresh()}catch(err){showStatus(err.message,'error')}});\n";
     var newHandler = "function setTwoFactorMode(enabled){const row=$('#twoFactorRow'),button=$('#loginBtn'),code=$('#code');row.classList.toggle('hidden',!enabled);code.required=!!enabled;button.textContent=enabled?'提交验证码并登录':'登录并保存会话';if(!enabled)code.value=''}\n$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();const code=$('#code').value.trim();showStatus(code?'正在验证双重认证码…':'正在登录 Apple ID…');try{const a=await api('/api/login',{method:'POST',body:{appleId:$('#appleId').value,password:$('#password').value,code}});$('#password').value='';setTwoFactorMode(false);showStatus('登录成功：'+a.appleId,'good');refresh()}catch(err){if(/MZFinance\\.BadLogin\\.Configurator_message|双重|验证码|安全码|two[ -]?factor|verification code/i.test(err.message)){setTwoFactorMode(true);showStatus('Apple 需要双重认证，请输入 6 位验证码后继续登录','warn');setTimeout(()=>{$('#code').focus();$('#twoFactorRow').scrollIntoView({behavior:'smooth',block:'center'})},80)}else{showStatus(err.message,'error')}}});\n";
     if (source.indexOf(oldHandler) >= 0) source = source.replace(oldHandler, newHandler);
-    if (source.indexOf('id="appleId" type="text"') < 0 || source.indexOf('id="twoFactorRow"') < 0 || source.indexOf("setTwoFactorMode") < 0 || source.indexOf("MZFinance\\.BadLogin\\.Configurator_message") < 0 || source.indexOf("TWO_FACTOR_REQUIRED") < 0) throw new Error("登录与双重认证热修复未能应用，请更新或重新安装插件");
+    if (source.indexOf('id="appleId" type="text"') < 0 || source.indexOf('id="twoFactorRow"') < 0 || source.indexOf("setTwoFactorMode") < 0 || source.indexOf("MZFinance\\.BadLogin\\.Configurator_message") < 0 || source.indexOf("TWO_FACTOR_REQUIRED") < 0 || source.indexOf("function normalizeCountry(value, fallback)") < 0) throw new Error("登录与双重认证热修复未能应用，请更新或重新安装插件");
     return source;
   }
 
