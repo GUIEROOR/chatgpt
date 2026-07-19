@@ -1,0 +1,265 @@
+h + 1);
+      }).join("\n") + "\n" + indent + "</array>";
+    }
+    if (typeof value === "object") {
+      var keys = Object.keys(value).filter(function (key) { return value[key] !== undefined; });
+      if (!keys.length) return indent + "<dict/>";
+      return indent + "<dict>\n" + keys.map(function (key) {
+        return nextIndent + "<key>" + escapeXml(key) + "</key>\n" + plistValue(value[key], depth + 1);
+      }).join("\n") + "\n" + indent + "</dict>";
+    }
+    return indent + "<string>" + escapeXml(value) + "</string>";
+  }
+
+  function buildPlist(value) {
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+      "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n" +
+      "<plist version=\"1.0\">\n" + plistValue(value, 1) + "\n</plist>";
+  }
+
+  function parsePlist(xml) {
+    var source = String(xml == null ? "" : xml)
+      .replace(/<!--([\s\S]*?)-->/g, "")
+      .replace(/<\?xml[\s\S]*?\?>/gi, "")
+      .replace(/<!DOCTYPE[\s\S]*?>/gi, "")
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, function (_, content) { return escapeXml(content); });
+    var tokens = source.match(/<[^>]+>|[^<]+/g) || [];
+    var index = 0;
+
+    function skipWhitespace() {
+      while (index < tokens.length && !/^</.test(tokens[index]) && /^\s*$/.test(tokens[index])) index += 1;
+    }
+
+    function tagName(token) {
+      var match = String(token || "").match(/^<\/?\s*([^\s/>]+)/);
+      return match ? match[1].toLowerCase() : "";
+    }
+
+    function isClosing(token, name) {
+      return new RegExp("^<\\/\\s*" + name + "\\s*>", "i").test(String(token || ""));
+    }
+
+    function readTextUntil(name) {
+      var text = "";
+      while (index < tokens.length && !isClosing(tokens[index], name)) {
+        text += tokens[index];
+        index += 1;
+      }
+      if (index < tokens.length) index += 1;
+      return decodeXml(text);
+    }
+
+    function readNode() {
+      skipWhitespace();
+      if (index >= tokens.length) return null;
+      var open = tokens[index++];
+      if (!/^</.test(open)) return decodeXml(open);
+      var name = tagName(open);
+      var selfClosing = /\/\s*>$/.test(open);
+
+      if (name === "plist") {
+        var root = readNode();
+        while (index < tokens.length && !isClosing(tokens[index], "plist")) index += 1;
+        if (index < tokens.length) index += 1;
+        return root;
+      }
+      if (name === "true") {
+        if (!selfClosing) readTextUntil("true");
+        return true;
+      }
+      if (name === "false") {
+        if (!selfClosing) readTextUntil("false");
+        return false;
+      }
+      if (name === "dict") {
+        var object = {};
+        if (selfClosing) return object;
+        while (index < tokens.length) {
+          skipWhitespace();
+          if (isClosing(tokens[index], "dict")) {
+            index += 1;
+            break;
+          }
+          var keyOpen = tokens[index++];
+          if (tagName(keyOpen) !== "key") throw new Error("Plist dict 中缺少 key");
+          var key = readTextUntil("key");
+          object[key] = readNode();
+        }
+        return object;
+      }
+      if (name === "array") {
+        var array = [];
+        if (selfClosing) return array;
+        while (index < tokens.length) {
+          skipWhitespace();
+          if (isClosing(tokens[index], "array")) {
+            index += 1;
+            break;
+          }
+          array.push(readNode());
+        }
+        return array;
+      }
+      if (name === "string" || name === "key") return selfClosing ? "" : readTextUntil(name);
+      if (name === "data") return new PlistData(selfClosing ? "" : readTextUntil("data"));
+      if (name === "date") return selfClosing ? "" : readTextUntil("date");
+      if (name === "integer") {
+        var integerText = selfClosing ? "0" : readTextUntil("integer").trim();
+        var integerValue = Number(integerText);
+        return Number.isSafeInteger && Number.isSafeInteger(integerValue) ? integerValue : integerText;
+      }
+      if (name === "real") {
+        var realText = selfClosing ? "0" : readTextUntil("real").trim();
+        return Number(realText);
+      }
+      return selfClosing ? "" : readTextUntil(name);
+    }
+
+    return readNode();
+  }
+
+  function normalizedHeaders(headers) {
+    var output = {};
+    Object.keys(headers || {}).forEach(function (key) {
+      output[String(key).toLowerCase()] = headers[key];
+    });
+    return output;
+  }
+
+  function sleep(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  function isRetryableStatus(status) {
+    return status === 0 || status === 408 || status === 425 || status === 429 || status >= 500;
+  }
+
+  function requestOnce(method, options, alpn) {
+    return new Promise(function (resolve, reject) {
+      var params = {
+        url: options.url,
+        headers: options.headers || {},
+        timeout: options.timeout || DEFAULT_TIMEOUT,
+        auto_redirect: options.autoRedirect !== false,
+        "auto-redirect": options.autoRedirect !== false,
+        "auto-cookie": false,
+        alpn: alpn || options.alpn || "h2"
+      };
+      if (options.body != null) params.body = options.body;
+      if (options.binaryMode) params["binary-mode"] = true;
+      var fn = $httpClient[String(method || "get").toLowerCase()];
+      if (typeof fn !== "function") return reject(new Error("Loon 不支持 HTTP 方法: " + method));
+      fn(params, function (error, response, data) {
+        if (error) {
+          var transportError = new Error(String(error));
+          transportError.status = 0;
+          return reject(transportError);
+        }
+        var status = response && (response.status || response.statusCode) || 0;
+        var result = {
+          status: status,
+          headers: normalizedHeaders(response && response.headers || {}),
+          body: data == null ? "" : data
+        };
+        if (status < 200 || status >= 400) {
+          var requestError = new Error("HTTP " + status + "：" + options.url);
+          requestError.status = status;
+          requestError.response = result;
+          return reject(requestError);
+        }
+        resolve(result);
+      });
+    });
+  }
+
+  async function http(method, options) {
+    options = options || {};
+    var normalizedMethod = String(method || "get").toLowerCase();
+    var defaultRetries = normalizedMethod === "get" || normalizedMethod === "head" ? ARG_MAX_RETRY : 0;
+    var retries = options.retries == null ? defaultRetries : Math.max(0, Number(options.retries) || 0);
+    var lastError;
+    for (var attempt = 0; attempt <= retries; attempt += 1) {
+      var alpn = attempt === retries && attempt > 0 ? "h1" : (options.alpn || "h2");
+      try {
+        var startedAt = Date.now();
+        var result = await requestOnce(normalizedMethod, options, alpn);
+        result.elapsedMs = Date.now() - startedAt;
+        result.attempt = attempt + 1;
+        result.alpn = alpn;
+        return result;
+      } catch (error) {
+        lastError = error;
+        var status = error && (error.status || error.response && error.response.status) || 0;
+        var retryable = options.retryAll === true || isRetryableStatus(Number(status));
+        if (!retryable || attempt >= retries) throw error;
+        var wait = Math.min(2200, 280 * Math.pow(2, attempt) + Math.floor(Math.random() * 180));
+        log("请求重试", attempt + 1, normalizedMethod.toUpperCase(), options.url, String(error && error.message || error));
+        await sleep(wait);
+      }
+    }
+    throw lastError || new Error("网络请求失败");
+  }
+
+  function applePost(url, body, headers, retries) {
+    var finalHeaders = {
+      "User-Agent": USER_AGENT,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "*/*",
+      "Accept-Language": "zh-CN,zh-Hans;q=0.9,en;q=0.7"
+    };
+    Object.keys(headers || {}).forEach(function (key) { finalHeaders[key] = headers[key]; });
+    return http("post", {
+      url: url,
+      body: body,
+      headers: finalHeaders,
+      timeout: 22000,
+      retries: retries == null ? 0 : retries
+    });
+  }
+
+  function parseUrl(url) {
+    var match = String(url || "").match(/^(https?):\/\/([^/]+)(\/[^?#]*)?(?:\?([^#]*))?/i);
+    var path = match && match[3] || "/";
+    var query = {};
+    String(match && match[4] || "").split("&").forEach(function (pair) {
+      if (!pair) return;
+      var parts = pair.split("=");
+      var key = decodeURIComponent(parts.shift().replace(/\+/g, " "));
+      var value = decodeURIComponent(parts.join("=").replace(/\+/g, " "));
+      query[key] = value;
+    });
+    return {
+      protocol: match && match[1] || "http",
+      host: String(match && match[2] || "").toLowerCase().split(":")[0],
+      path: path,
+      query: query
+    };
+  }
+
+  function normalizeCookieHeader(setCookie) {
+    var raw = Array.isArray(setCookie) ? setCookie.join(", ") : String(setCookie || "");
+    if (!raw) return "";
+    var blocked = { path: 1, expires: 1, domain: 1, secure: 1, httponly: 1, samesite: 1, version: 1, maxage: 1, "max-age": 1 };
+    var pairs = [];
+    var regex = /(?:^|,\s*)([^=;,\s]+)=([^;\r\n]*)/g;
+    var match;
+    while ((match = regex.exec(raw))) {
+      var name = String(match[1] || "").trim();
+      var value = String(match[2] || "").trim();
+      if (!name || blocked[name.toLowerCase()]) continue;
+      pairs.push(name + "=" + value);
+    }
+    if (!pairs.length) {
+      var first = raw.split(";")[0].trim();
+      if (first.indexOf("=") > 0) pairs.push(first);
+    }
+    return pairs.join("; ");
+  }
+
+  function mergeCookies(existing, incoming) {
+    var map = {};
+    function add(header) {
+      String(header || "").split(/;\s*/).forEach(function (pair) {
+        var index = pair.indexOf("=");
+        if (index <= 0) return;
+        map[pair.slice(0, index).trim()
