@@ -1,0 +1,56 @@
+"登录成功",
+        loginData: legacyLoginData(currentAccount(state))
+      }, "登录成功"));
+    }
+
+    if (method === "POST" && path === "/auth/refresh") {
+      await refreshLogin(state);
+      return sendCompatibilityJson(200, compatibilityResponse(true, { message: "Cookie 刷新成功" }, "Cookie 刷新成功"));
+    }
+
+    if (method === "POST" && path === "/auth/reset") {
+      state.accounts = {};
+      state.activeAccount = "";
+      state.versionCache = {};
+      state.guid = randomHex(12);
+      writeState(state);
+      return sendCompatibilityJson(200, compatibilityResponse(true, { success: true, message: "登录状态、GUID 与版本缓存已重置" }, "重置成功"));
+    }
+
+    var searchMatch = path.match(/^\/apps\/search\/(.+)$/);
+    if (method === "GET" && searchMatch) {
+      var term = decodeRepeated(searchMatch[1]);
+      var country = normalizeCountry(parsed.query.country, state.settings.country || "us");
+      var limit = Math.max(1, Math.min(20, parseInt(String(parsed.query.limit || "10"), 10) || 10));
+      var list = await searchApps(term, country, limit);
+      addSearchHistory(state, term, country);
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        searchTerm: term,
+        explicit: true,
+        data: list,
+        total: list.length
+      }));
+    }
+
+    var legacyMatch = path.match(/^\/apps\/(\d+)\/versions\/legacy$/);
+    if (method === "GET" && legacyMatch) {
+      var legacy = await thirdPartyVersions(legacyMatch[1], parsed.query.selset || "");
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        appId: legacyMatch[1],
+        data: legacy.data.map(function (item) { return [item[0], item[1]]; }),
+        total: legacy.data.length,
+        source: legacy.source,
+        providerErrors: legacy.errors
+      }));
+    }
+
+    var versionsMatch = path.match(/^\/apps\/(\d+)\/versions$/);
+    if (method === "GET" && versionsMatch) {
+      var full = await getVersions(state, versionsMatch[1], parsed.query.force === "1");
+      var rows = full.data.map(function (item) { return [item[0], item[1]]; });
+      var count = parseInt(String(parsed.query.count == null ? "-1" : parsed.query.count), 10);
+      if (!isFinite(count) || count < -1 || count > 20 || count === 0) throw new Error("分页数量只能为 -1 或 1-20");
+      var direction = parsed.query.direction === "prev" ? "prev" : "next";
+      var startId = String(parsed.query.appVerId || "");
+      if (count !== -1) {
+        var index = r
