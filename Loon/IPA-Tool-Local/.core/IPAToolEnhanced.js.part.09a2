@@ -1,0 +1,48 @@
+"0").replace(/[^0-9]/g, "") || "0";
+    var bundleId = String(query.bundleId || "com.ipatool.app");
+    var fileName = name + "@" + displayVersion + "@" + appId + ".ipa";
+    var packageUrl = "http://localhost:8000/" + encodeURI(fileName);
+    var manifest = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n' +
+      '<plist version="1.0"><dict><key>items</key><array><dict>' +
+      '<key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>' + escapeXml(packageUrl) + '</string></dict></array>' +
+      '<key>metadata</key><dict><key>bundle-identifier</key><string>' + escapeXml(bundleId) + '</string>' +
+      '<key>bundle-version</key><string>' + escapeXml(displayVersion) + '</string><key>kind</key><string>software</string>' +
+      '<key>title</key><string>' + escapeXml(name) + '</string></dict></dict></array></dict></plist>';
+    return send(200, manifest, compatibilityHeaders("application/xml; charset=utf-8"));
+  }
+
+  function legacyAppInfo(info) {
+    var output = {};
+    Object.keys(info || {}).forEach(function (key) {
+      if (key !== "metadataObject") output[key] = info[key];
+    });
+    output.metadata = info.metadataObject || {};
+    output.sinf = info.sinfBase64 || "";
+    return output;
+  }
+
+  async function routeLegacyAppleApi(state, parsed, body, method) {
+    if (!(state.settings.compatMode || COMPAT_MODE)) {
+      return sendCompatibilityJson(403, compatibilityResponse(false, null, "原版接口兼容模式已关闭"));
+    }
+    var path = parsed.path.replace(/\/+$/, "") || "/";
+    if (method === "OPTIONS") return send(204, "", compatibilityHeaders());
+
+    if (method === "GET" && (path === "/" || path === "/ipa-tool")) {
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        name: "Apple Store API · Loon Enhanced",
+        version: APP_VERSION,
+        description: "兼容 IPA 工具箱原版接口，并使用 Loon 本地持久化会话",
+        endpoints: [
+          "POST /auth/login", "POST /auth/refresh", "POST /auth/reset",
+          "GET /apps/:id", "GET /apps/:id/versions", "GET /apps/:id/versions/legacy",
+          "POST /apps/:id/purchase", "GET /apps/search/:term"
+        ]
+      }));
+    }
+
+    if (method === "POST" && path === "/auth/login") {
+      await login(state, body);
+      return sendCompatibilityJson(200, compatibilityResponse(true, {
+        message: 
