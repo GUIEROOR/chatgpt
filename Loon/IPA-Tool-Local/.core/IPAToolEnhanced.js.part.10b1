@@ -1,0 +1,52 @@
+sed.query.term || "");
+      var searchResult = await searchApps(term, searchCountry, 30);
+      addSearchHistory(state, term, searchCountry);
+      return sendJson(200, ok(searchResult));
+    }
+
+    if (method === "GET" && path === "/api/lookup") {
+      var lookupId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(lookupId)) throw new Error("App ID 无效");
+      var lookupCountry = normalizeCountry(parsed.query.country, state.settings.country || "us");
+      var lookup = await lookupApp(lookupId, lookupCountry);
+      addSearchHistory(state, lookupId, lookupCountry);
+      return sendJson(200, ok(lookup));
+    }
+
+    if (method === "GET" && path === "/api/versions") {
+      var versionId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(versionId)) throw new Error("App ID 无效");
+      return sendJson(200, ok(await getVersions(state, versionId, parsed.query.force === "1")));
+    }
+
+    if (method === "POST" && path === "/api/purchase") {
+      var purchaseId = String(body.appId || "");
+      if (!/^\d+$/.test(purchaseId)) throw new Error("App ID 无效");
+      return sendJson(200, ok(await purchaseApp(state, purchaseId)));
+    }
+
+    if (method === "GET" && (path === "/api/app-info" || path === "/api/package" || path === "/api/download/prepare")) {
+      var infoId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(infoId)) throw new Error("App ID 无效");
+      var info = await getAppInfo(state, infoId, parsed.query.version || "");
+      if (path === "/api/download/prepare") addDownloadHistory(state, info, "panel");
+      var publicInfo = {};
+      Object.keys(info).forEach(function (key) { if (key !== "metadataObject") publicInfo[key] = info[key]; });
+      return sendJson(200, ok(publicInfo));
+    }
+
+    if (method === "GET" && path === "/api/download") {
+      var downloadId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(downloadId)) throw new Error("App ID 无效");
+      var downloadInfo = await getAppInfo(state, downloadId, parsed.query.version || "");
+      if (!downloadInfo.url) throw new Error("Apple 未返回下载地址");
+      addDownloadHistory(state, downloadInfo, "direct");
+      return send(302, "", {
+        "Location": downloadInfo.url,
+        "Cache-Control": "no-store",
+        "X-IPA-App-Name": encodeURIComponent(downloadInfo.name || "App"),
+        "X-IPA-Version": String(downloadInfo.displayVersion || "")
+      });
+    }
+
+    if (method === "GET" && path === "/api/met
