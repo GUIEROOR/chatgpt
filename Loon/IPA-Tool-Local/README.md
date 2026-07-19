@@ -15,66 +15,65 @@ https://www.nsloon.com/openloon/import?plugin=https%3A%2F%2Fraw.githubuserconten
 
 https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPA-Tool-Enhanced.lpx
 
-## 打开面板
-
-安装或更新插件后，启用插件与 MitM，保持 Loon VPN 运行，然后在 Safari 打开：
+安装或更新后，保持 Loon、插件和 MitM 开启，再用 Safari 打开：
 
 https://apple-api.com/ipa-tool
 
-也可以在 Loon 的脚本页面手动运行“打开 IPA 工具箱面板”，再点击通知。
+## 2.0.5：5002、下载与历史版本修复
 
-## 2.0.4 商店地区修复
+Apple 在 2026 年 6 月调整了 `volumeStoreDownloadProduct` 的校验。部分应用在下载请求缺少设备序列号时会返回：
 
-- App Store Search 的 country 参数必须是国家或地区代码，中文商店应使用 `cn`，而不是语言代码 `zh`。
-- 旧版把设置中的 `zh` 原样发送给 iTunes Search，因此返回 HTTP 400。
-- 2.0.4 会自动将 `zh`、`zh-CN`、`中国`、`中国大陆`、`china` 转为 `cn`。
-- 同时支持香港 `hk`、澳门 `mo`、台湾 `tw`、美国 `us`、日本 `jp`、韩国 `kr`、新加坡 `sg` 等代码。
-- 已保存为 `zh` 的旧设置会在打开面板时自动迁移为 `cn`，搜索框也会同步显示 `cn`。
+`5002 · An unknown error has occurred`
 
-## 2.0.3 双重认证修复
+2.0.5 做了以下修复：
 
-- Apple 私有登录接口可能使用 `MZFinance.BadLogin.Configurator_message` 表示需要继续双重认证。
-- 旧版没有识别这个内部消息键，因此只显示“登录失败”，验证码框不会出现。
-- 2.0.3 会将该响应识别为登录验证挑战，立即显示并聚焦 6 位验证码输入框。
-- 若输入验证码后仍返回同一消息，会提示验证码可能过期、错误，或账号密码不正确。
-- 如果手机完全没有收到 Apple 验证码，请先确认 Apple ID、密码以及受信任设备状态，不要连续反复尝试。
+- 下载请求加入 `serialNumber=0`。
+- 补齐 `X-Token`、`X-Dsid`、`iCloud-DSID` 和 `X-Apple-Store-Front`。
+- 登录时保存 Apple 返回的 Pod，并优先使用 `p<Pod>-buy.itunes.apple.com`。
+- 对旧会话没有 Pod 的情况，自动尝试 Pod、`p25-buy` 与 `buy.itunes.apple.com` 节点。
+- 遇到 5002 时依次尝试节点切换、免费许可恢复和短暂退避重试。
+- `5002` 出现在获取许可接口时按“已经拥有许可”处理，不再误报失败。
+- 历史版本索引与 Apple 下载详情解耦：Apple 官方详情暂时失败时，只要 Timbrd 或 Bilin 仍可用，历史版本列表仍会显示。
+- 只有点击某个版本的“查看下载详情”时才请求 Apple 包信息，减少卡顿和无效请求。
 
-## 2.0.2 登录流程
+### 更新后仍出现 5002
 
-- Apple ID 输入框支持邮箱和手机号，不再使用 Safari 的邮箱格式校验。
-- 中国大陆手机号可以直接填写 `+86138...`。
-- 从通讯录复制的 `+86 138-0013-8000`、括号、空格、短横线和全角 `＋` 会自动规范化。
-- 首次只显示 Apple ID 和密码。
-- Apple 返回双重认证要求后，页面才显示 6 位验证码输入框并自动聚焦。
-- 验证码阶段会保留当前账号与密码，输入验证码后再次提交；成功后才清空密码。
+1. 在 Loon 插件页确认说明显示 `2.0.5`。
+2. 关闭 Safari 旧标签页，再打开 `https://apple-api.com/ipa-tool`。
+3. 点一次“刷新 Cookie”；若没有保存密码，则重新登录。
+4. 确认应用在当前账号所属商店地区存在，且免费应用已取得许可。
+5. 下架、付费、地区不一致或账号没有许可的应用，Apple 仍可能拒绝提供下载信息。
 
-## 面板打不开时
+## 2.0.4：商店地区修复
 
-1. 在 Loon 插件页面点“更新资源”；若仍是旧界面，删除插件后重新一键安装。
-2. 确认插件、Loon VPN 和 MitM 均已开启。
-3. 确认 Loon 证书已经安装，并在 iOS“关于本机 → 证书信任设置”中完全信任。
-4. 检查 MitM hostname 中包含 `apple-api.com`。
-5. 彻底关闭 Safari 旧标签页，再重新打开 `https://apple-api.com/ipa-tool`。
+- `zh` 是语言代码，中文 App Store 应使用 `cn`。
+- `zh`、`zh-CN`、`中国`、`中国大陆`、`china` 会自动转换为 `cn`。
+- 支持 `hk`、`mo`、`tw`、`us`、`jp`、`kr`、`sg` 等地区代码。
 
-> `http://ipa-tool.local/` 已弃用。`.local` 可能被 iOS mDNS 或 Loon 的 `bypass-tun` 绕过。
+## 2.0.3：双重认证修复
 
-## 主要改进
+- 将 `MZFinance.BadLogin.Configurator_message` 识别为 Apple 双重认证挑战。
+- 验证码框仅在 Apple 要求后显示并自动聚焦。
 
-- 响应式网页、深色模式、iPhone/iPad 适配。
-- 历史版本索引先加载，下载详情按需查询，减少卡顿。
-- 多账号、收藏、搜索记录、下载记录和版本缓存。
-- 状态备份恢复、指数退避重试、HTTP/2 到 HTTP/1.1 回退。
-- Timbrd 与 Bilin 版本源并发查询、去重合并。
-- 下载以 302 直跳 Apple CDN，IPA 大文件不经过 JavaScript 中转。
-- 密码默认不落盘；仅显式开启 `remember_password` 时保存。
-- 保持原版 `/auth/*`、`/apps/*` 与 `xiaobai.app` 安装器兼容。
+## 2.0.2：手机号 Apple ID
+
+- Apple ID 支持邮箱和 `+86` 手机号。
+- 自动规范化手机号中的空格、括号、短横线和全角 `＋`。
+
+## 本地持久化方式
+
+2.0.5 的轻量启动器首次运行时并发下载 20 个原始核心分片，拼接校验后保存到 Loon `$persistentStore`。后续打开面板直接使用本地缓存。旧 `.parts/` 压缩文件仅为历史版本兼容保留。
 
 ## 密码和隐私
 
-默认不会持久化 Apple ID 密码，只保存 Apple 返回的 Cookie、DSID、passwordToken 和 StoreFront。若开启 `remember_password`，密码会以普通字符串保存在 Loon `$persistentStore`，仅建议在可信设备上使用。
+默认不会持久化 Apple ID 密码，只保存 Apple 返回的 Cookie、DSID、passwordToken、StoreFront 和 Pod。若开启 `remember_password`，密码会以普通字符串保存在 Loon `$persistentStore`，仅建议在可信设备上使用。
 
 ## Loon 能力限制
 
 Loon 没有通用文件目录、流式写文件、ZIP 编辑与重打包 API，因此不能纯靠 Loon 自动把 `iTunesMetadata.plist` 和 `.sinf` 注入 IPA。面板提供 Apple CDN 原始包和对应元数据导出；需要完整注入时仍需 Scripting、快捷指令或电脑程序。
+
+## 验证
+
+发布前已完成 JavaScript 语法检查、首次核心加载与持久化缓存测试、登录 Pod 保存测试、5002 自动恢复测试、下载请求头与 `serialNumber=0` 校验，以及 Apple 官方详情失败时的历史版本回退测试。尚未替代真实 Apple ID 在所有地区和应用上的实机验证。
 
 仅用于你本人 Apple ID 已合法取得许可的应用。
