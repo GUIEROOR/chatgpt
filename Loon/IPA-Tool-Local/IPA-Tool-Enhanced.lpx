@@ -1,5 +1,5 @@
 #!name=IPA 工具箱增强版
-#!desc=IPA 工具箱增强版 2.0.3：修复 MZFinance.BadLogin.Configurator_message 未弹出双重认证输入框，支持邮箱与手机号 Apple ID。
+#!desc=IPA 工具箱增强版 2.0.4：修复商店地区误填 zh 导致 iTunes Search HTTP 400，自动转换为 cn，并保留手机号 Apple ID 与双重认证支持。
 #!openUrl=https://apple-api.com/ipa-tool
 #!author=GUIEROOR / ChatGPT
 #!tag=功能增强,IPA,本地工具
@@ -8,10 +8,10 @@
 #!loon_version=3.4.0(962)
 #!homepage=https://github.com/GUIEROOR/chatgpt/tree/main/Loon/IPA-Tool-Local
 #!icon=https://raw.githubusercontent.com/luestr/IconResource/main/Other_icon/120px/IPATool.png
-#!date=2026-07-19 19:05:00
+#!date=2026-07-19 19:40:00
 
 [Argument]
-default_country=input,"us",tag=默认商店地区,desc=两位国家或地区代码，例如 us、cn、hk、jp
+default_country=input,"cn",tag=默认商店地区,desc=国家或地区代码，例如 cn、us、hk、jp；zh、zh-CN、中国会自动转换为 cn
 cache_hours=input,"24",tag=版本缓存时长,desc=历史版本列表的本地缓存小时数，建议 6-72
 compat_mode=switch,true,tag=兼容原版工具箱,desc=接管 apple-api.com 与 xiaobai.app，供 Scripting 版 IPA 工具箱继续调用
 remember_password=switch,false,tag=允许自动刷新登录,desc=开启后会把 Apple ID 密码保存在 Loon 本地持久化存储中；默认关闭更安全
@@ -19,9 +19,9 @@ max_retry=select,"2","0,1,2,3",tag=网络重试次数,desc=Apple 与版本源请
 debug=switch,false,tag=调试日志,desc=开启后在 Loon 日志中输出路由、重试与错误详情
 
 [Script]
-http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,requires-body=true,timeout=60,tag=IPA 工具箱面板与 API,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
-http-request ^https:\/\/xiaobai\.app(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,timeout=30,tag=原版安装器兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
-generic script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.3,timeout=10,tag=打开 IPA 工具箱面板,img-url=shippingbox.fill,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+http-request ^https:\/\/apple-api\.com(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.4,requires-body=true,timeout=60,tag=IPA 工具箱面板与 API,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+http-request ^https:\/\/xiaobai\.app(?:\/.*)?$ script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.4,timeout=30,tag=原版安装器兼容,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
+generic script-path=https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/IPAToolEnhanced.js?v=2.0.4,timeout=10,tag=打开 IPA 工具箱面板,img-url=shippingbox.fill,argument=[{default_country},{cache_hours},{compat_mode},{remember_password},{max_retry},{debug}]
 
 [MitM]
 hostname=apple-api.com, xiaobai.app
