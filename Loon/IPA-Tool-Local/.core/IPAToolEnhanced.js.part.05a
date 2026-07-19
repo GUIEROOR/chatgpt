@@ -1,0 +1,123 @@
+=== "2042") account.sessionStatus = "expired";
+        lastError = purchaseError;
+        if (purchaseError.code !== "2059") break;
+        continue;
+      }
+      account.lastUsedAt = nowISO();
+      account.sessionStatus = "active";
+      writeState(state);
+      return { appId: String(appId), submitted: true, jingleDocType: parsed && parsed.jingleDocType || "" };
+    }
+    writeState(state);
+    if (options && options.recovery && lastError && String(lastError.code || "") === "2019") throw lastError;
+    throw lastError || new Error("获取许可失败：Apple 商店节点不可用");
+  }
+
+  function mapSearchItem(item) {
+    return {
+      appId: item.trackId,
+      name: item.trackName,
+      bundleId: item.bundleId,
+      version: item.version,
+      icon: String(item.artworkUrl100 || item.artworkUrl60 || "").replace("100x100bb", "240x240bb"),
+      price: item.formattedPrice || item.price,
+      currency: item.currency || "",
+      seller: item.sellerName || "",
+      minimumOsVersion: item.minimumOsVersion || "",
+      storeUrl: item.trackViewUrl || "",
+      description: item.description || "",
+      fileSize: Number(item.fileSizeBytes || 0),
+      averageUserRating: Number(item.averageUserRating || 0),
+      userRatingCount: Number(item.userRatingCount || 0),
+      genres: item.genres || []
+    };
+  }
+
+  async function searchApps(term, country, limit) {
+    if (!term) throw new Error("请输入应用名称或关键词");
+    country = normalizeCountry(country, "us");
+    var safeLimit = Math.max(1, Math.min(50, Number(limit || 20)));
+    var url = "https://itunes.apple.com/search?entity=software&explicit=no&term=" + encodeURIComponent(term) +
+      "&country=" + encodeURIComponent(country) + "&limit=" + encodeURIComponent(String(safeLimit));
+    var response = await http("get", { url: url, headers: { "User-Agent": "Mozilla/5.0" }, timeout: 16000 });
+    var parsed = safeJsonParse(String(response.body), null);
+    if (!parsed) throw new Error("iTunes Search 返回了无法解析的数据");
+    return (parsed.results || []).map(mapSearchItem);
+  }
+
+  async function lookupApp(appId, country) {
+    country = normalizeCountry(country, "us");
+    var url = "https://itunes.apple.com/lookup?id=" + encodeURIComponent(String(appId)) + "&country=" + encodeURIComponent(country);
+    var response = await http("get", { url: url, headers: { "User-Agent": "Mozilla/5.0" }, timeout: 16000 });
+    var parsed = safeJsonParse(String(response.body), null);
+    if (!parsed) throw new Error("iTunes Lookup 返回了无法解析的数据");
+    var item = parsed.results && parsed.results[0] || null;
+    return item ? mapSearchItem(item) : null;
+  }
+
+  function today() {
+    var date = new Date();
+    var yyyy = date.getFullYear();
+    var mm = String(date.getMonth() + 1).padStart(2, "0");
+    var dd = String(date.getDate()).padStart(2, "0");
+    return yyyy + "-" + mm + "-" + dd;
+  }
+
+  function settle(promise, name) {
+    return promise.then(function (value) {
+      return { ok: true, name: name, value: value };
+    }).catch(function (error) {
+      return { ok: false, name: name, error: error };
+    });
+  }
+
+  async function fetchTimbrdVersions(appId) {
+    var response = await http("get", {
+      url: "https://api.timbrd.com/apple/app-version/index.php?id=" + encodeURIComponent(String(appId)),
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
+      retries: 1
+    });
+    var data = safeJsonParse(String(response.body), null);
+    if (!Array.isArray(data)) throw new Error("Timbrd 返回格式异常");
+    return data.slice().reverse().map(function (item) {
+      return [String(item.external_identifier), String(item.bundle_version || "????"), today()];
+    });
+  }
+
+  async function fetchBilinVersions(appId) {
+    var response = await http("get", {
+      url: "https://apis.bilin.eu.org/history/" + encodeURIComponent(String(appId)),
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
+      retries: 1
+    });
+    var parsed = safeJsonParse(String(response.body), null);
+    if (!parsed || !Array.isArray(parsed.data)) throw new Error("Bilin 返回格式异常");
+    return parsed.data.map(function (item) {
+      return [String(item.external_identifier), String(item.bundle_version || "????"), today()];
+    });
+  }
+
+  function mergeVersionSources(results) {
+    var merged = [];
+    var index = {};
+    results.forEach(function (result) {
+      if (!result.ok) return;
+      (result.value || []).forEach(function (item) {
+        var id = String(item[0]);
+        var version = String(item[1] || "????");
+        if (index[id] == null) {
+          index[id] = merged.length;
+          merged.push([id, version, item[2] || today()]);
+        } else if (merged[index[id]][1] === "????" && version !== "????") {
+          merged[index[id]][1] = version;
+        }
+      });
+    });
+    return merged;
+  }
+
+  async function thirdPartyVersions(appId, preferred) {
+    var jobs = [];
+    var normalized = St
