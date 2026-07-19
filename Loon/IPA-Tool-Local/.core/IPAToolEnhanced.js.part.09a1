@@ -1,0 +1,78 @@
+ntent=BUILD;refresh();
+</script>
+</body>
+</html>`;
+  }
+
+  function base64ToBytes(base64) {
+    var clean = String(base64 || "").replace(/\s/g, "");
+    if (typeof atob === "function") {
+      var binary = atob(clean);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    }
+    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    var output = [];
+    var buffer = 0;
+    var bits = 0;
+    for (var j = 0; j < clean.length; j += 1) {
+      var char = clean.charAt(j);
+      if (char === "=") break;
+      var value = alphabet.indexOf(char);
+      if (value < 0) continue;
+      buffer = (buffer << 6) | value;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        output.push((buffer >> bits) & 255);
+      }
+    }
+    return new Uint8Array(output);
+  }
+
+  function compatibilityResponse(success, data, message) {
+    return {
+      success: !!success,
+      data: success ? data : null,
+      message: message || (success ? "请求成功" : "请求失败"),
+      error: success ? null : (message || "请求失败"),
+      timestamp: nowISO()
+    };
+  }
+
+  function compatibilityHeaders(type) {
+    return Object.assign(commonHeaders(type || "application/json; charset=utf-8"), {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, X-Requested-With",
+      "X-IPA-Tool-Version": APP_VERSION
+    });
+  }
+
+  function sendCompatibilityJson(status, data) {
+    return send(status, JSON.stringify(data), compatibilityHeaders("application/json; charset=utf-8"));
+  }
+
+  function decodeRepeated(value) {
+    var result = String(value == null ? "" : value);
+    for (var i = 0; i < 2; i += 1) {
+      try {
+        var decoded = decodeURIComponent(result);
+        if (decoded === result) break;
+        result = decoded;
+      } catch (error) {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function routeInstaller(parsed) {
+    var query = {};
+    Object.keys(parsed.query || {}).forEach(function (key) {
+      query[key] = decodeRepeated(parsed.query[key]);
+    });
+    var name = String(query.name || "IPA Tool").replace(/[\\/:*?\"<>|]/g, "_");
+    var displayVersion = String(query.displayVersion || query.version || "1.0").replace(/[\\/:*?\"<>|]/g, "_");
+    var appId = String(query.id || query.appId || 
