@@ -1,0 +1,56 @@
+anitizeAccount(state.accounts[switchKey])));
+    }
+
+    if (method === "POST" && path === "/api/settings") {
+      var country = normalizeCountry(body.country, state.settings.country || "us");
+      var cacheHours = parseInt(String(body.cacheHours || state.settings.cacheHours || 24), 10);
+      if (!isFinite(cacheHours) || cacheHours < 1 || cacheHours > 168) throw new Error("缓存时长必须在 1-168 小时之间");
+      state.settings.country = country;
+      state.settings.cacheHours = cacheHours;
+      if (body.compatMode != null) state.settings.compatMode = !!body.compatMode;
+      if (body.rememberPassword != null) {
+        state.settings.rememberPassword = !!body.rememberPassword;
+        if (!state.settings.rememberPassword) Object.keys(state.accounts).forEach(function (key) { delete state.accounts[key].legacyPassword; });
+      }
+      if (body.maxRetry != null) state.settings.maxRetry = Math.max(0, Math.min(3, parseInt(String(body.maxRetry), 10) || 0));
+      writeState(state);
+      return sendJson(200, ok(state.settings));
+    }
+
+    if (method === "POST" && path === "/api/cache/clear") {
+      state.versionCache = {};
+      writeState(state);
+      return sendJson(200, ok({ cleared: true }));
+    }
+
+    if (method === "POST" && path === "/api/history/clear") {
+      state.downloadHistory = [];
+      writeState(state);
+      return sendJson(200, ok({ cleared: true }));
+    }
+
+    if (method === "POST" && path === "/api/search-history/clear") {
+      state.searchHistory = [];
+      writeState(state);
+      return sendJson(200, ok({ cleared: true }));
+    }
+
+    if (method === "POST" && path === "/api/favorite/toggle") {
+      var favoriteId = String(body.appId || "");
+      if (!/^\d+$/.test(favoriteId)) throw new Error("App ID 无效");
+      if (state.favorites[favoriteId]) {
+        delete state.favorites[favoriteId];
+        writeState(state);
+        return sendJson(200, ok({ appId: favoriteId, favorite: false }));
+      }
+      state.favorites[favoriteId] = {
+        appId: favoriteId, name: String(body.name || favoriteId), bundleId: String(body.bundleId || ""),
+        icon: String(body.icon || ""), addedAt: nowISO()
+      };
+      writeState(state);
+      return sendJson(200, ok({ appId: favoriteId, favorite: true }));
+    }
+
+    if (method === "GET" && path === "/api/search") {
+      var searchCountry = normalizeCountry(parsed.query.country, state.settings.country || "us");
+      var term = String(par
