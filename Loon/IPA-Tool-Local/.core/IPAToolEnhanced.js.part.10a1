@@ -1,0 +1,57 @@
+est) {
+      return await routeLegacyAppleApi(state, parsed, body, method);
+    }
+    if (host === "xiaobai.app" || host === "www.xiaobai.app") {
+      return routeInstaller(parsed);
+    }
+
+    if (method === "GET" && (path === "/" || path === "/ipa-tool")) {
+      return send(200, htmlPage(state), Object.assign(commonHeaders("text/html; charset=utf-8"), {
+        "Content-Security-Policy": "default-src 'self' data: https:; img-src 'self' data: https:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'"
+      }));
+    }
+
+    if (method === "GET" && path === "/favicon.ico") return send(204, "", {});
+
+    if (method === "GET" && path === "/api/status") {
+      var active = state.accounts[state.activeAccount];
+      return sendJson(200, ok({
+        version: APP_VERSION,
+        activeAccount: sanitizeAccount(active),
+        accounts: sortedAccounts(state),
+        settings: state.settings,
+        guidSuffix: String(state.guid).slice(-4),
+        cacheCount: Object.keys(state.versionCache).length,
+        searchHistory: state.searchHistory || [],
+        favorites: sortedFavorites(state),
+        downloadHistory: state.downloadHistory || [],
+        diagnostics: state.diagnostics || { lastRunAt: "", results: [] },
+        runtime: typeof $loon === "object" && $loon ? $loon : null
+      }));
+    }
+
+    requireToken(parsed, body, state);
+
+    if (method === "POST" && path === "/api/login") {
+      return sendJson(200, ok(await login(state, body)));
+    }
+
+    if (method === "POST" && path === "/api/account/refresh") {
+      return sendJson(200, ok(await refreshLogin(state)));
+    }
+
+    if (method === "POST" && path === "/api/logout") {
+      var accountKey = String(body.appleId || state.activeAccount || "").toLowerCase();
+      if (accountKey && state.accounts[accountKey]) delete state.accounts[accountKey];
+      if (state.activeAccount === accountKey) state.activeAccount = Object.keys(state.accounts)[0] || "";
+      writeState(state);
+      return sendJson(200, ok({ removed: accountKey, activeAccount: state.activeAccount }));
+    }
+
+    if (method === "POST" && path === "/api/account/switch") {
+      var switchKey = String(body.appleId || "").toLowerCase();
+      if (!state.accounts[switchKey]) throw new Error("找不到要切换的本地账号会话");
+      state.activeAccount = switchKey;
+      state.accounts[switchKey].lastUsedAt = nowISO();
+      writeState(state);
+      return sendJson(200, ok(s
