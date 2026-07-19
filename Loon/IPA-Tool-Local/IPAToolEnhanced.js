@@ -2,10 +2,10 @@
 (function () {
   "use strict";
 
-  var LOADER_VERSION = "2.0.1";
+  var LOADER_VERSION = "2.0.2";
   var CORE_VERSION = "2.0.0";
   var CACHE_KEY = "ipa.tool.enhanced.core." + LOADER_VERSION;
-  var LEGACY_CACHE_KEY = "ipa.tool.enhanced.core." + CORE_VERSION;
+  var LEGACY_CACHE_KEYS = ["ipa.tool.enhanced.core.2.0.1", "ipa.tool.enhanced.core." + CORE_VERSION];
   var PART_COUNT = 7;
   var EXPECTED_LENGTH = 52232;
   var BASE = "https://raw.githubusercontent.com/GUIEROOR/chatgpt/main/Loon/IPA-Tool-Local/.parts/IPAToolEnhanced.lz64.";
@@ -17,10 +17,19 @@
   function valid(source) { return source.length > 50000 && source.indexOf("IPA Tool Local for Loon") >= 0 && source.indexOf("main();") >= 0; }
 
   function patchSource(source) {
-    return String(source || "")
-      .replace('var APP_VERSION = "2.0.0";', 'var APP_VERSION = "2.0.1";')
-      .replace('var BASE_ORIGIN = "http://ipa-tool.local";', 'var BASE_ORIGIN = "https://apple-api.com/ipa-tool";')
-      .replace('本地地址 ipa-tool.local', '面板地址 apple-api.com/ipa-tool');
+    source = String(source || "");
+    source = source.replace(/var APP_VERSION = "2\.0\.[0-2]";/, 'var APP_VERSION = "2.0.2";');
+    source = source.replace('var BASE_ORIGIN = "http://ipa-tool.local";', 'var BASE_ORIGIN = "https://apple-api.com/ipa-tool";');
+    source = source.replace("本地地址 ipa-tool.local", "面板地址 apple-api.com/ipa-tool");
+    source = source.replace('var appleId = String(input.appleId || "").trim();', 'var appleId = String(input.appleId || "").trim().replace(/^＋/, "+"); if (/^[+0-9 ()-]+$/.test(appleId)) appleId = appleId.replace(/[ ()-]/g, "");');
+    var oldHtml = "          <div class=\"field\"><label>Apple ID</label><input id=\"appleId\" type=\"email\" autocomplete=\"username\" required placeholder=\"name@example.com\"></div>\n          <div class=\"field\"><label>密码</label><input id=\"password\" type=\"password\" autocomplete=\"current-password\" required></div>\n          <div class=\"field small\"><label>双重认证验证码</label><input id=\"code\" inputmode=\"numeric\" maxlength=\"6\" placeholder=\"可选\"></div>\n        </div>\n        <div class=\"actions\"><button type=\"submit\">登录并保存会话</button><button id=\"refreshSessionBtn\" class=\"secondary\" type=\"button\">刷新 Cookie</button></div>\n";
+    var newHtml = "          <div class=\"field\"><label>Apple ID</label><input id=\"appleId\" type=\"text\" autocomplete=\"username\" autocapitalize=\"none\" autocorrect=\"off\" spellcheck=\"false\" required placeholder=\"邮箱或手机号（例如 +86138...）\"></div>\n          <div class=\"field\"><label>密码</label><input id=\"password\" type=\"password\" autocomplete=\"current-password\" required></div>\n          <div id=\"twoFactorRow\" class=\"field small hidden\"><label>双重认证验证码</label><input id=\"code\" type=\"text\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"6\" pattern=\"[0-9]{6}\" placeholder=\"6 位数字\"><div class=\"sub\">输入 Apple 发送到受信任设备的验证码</div></div>\n        </div>\n        <div class=\"actions\"><button id=\"loginBtn\" type=\"submit\">登录并保存会话</button><button id=\"refreshSessionBtn\" class=\"secondary\" type=\"button\">刷新 Cookie</button></div>\n";
+    if (source.indexOf(oldHtml) >= 0) source = source.replace(oldHtml, newHtml);
+    var oldHandler = "$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();showStatus('正在登录 Apple ID…');try{const a=await api('/api/login',{method:'POST',body:{appleId:$('#appleId').value,password:$('#password').value,code:$('#code').value}});$('#password').value='';$('#code').value='';showStatus('登录成功：'+a.appleId,'good');refresh()}catch(err){showStatus(err.message,'error')}});\n";
+    var newHandler = "function setTwoFactorMode(enabled){const row=$('#twoFactorRow'),button=$('#loginBtn'),code=$('#code');row.classList.toggle('hidden',!enabled);code.required=!!enabled;button.textContent=enabled?'提交验证码并登录':'登录并保存会话';if(!enabled)code.value=''}\n$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();const code=$('#code').value.trim();showStatus(code?'正在验证双重认证码…':'正在登录 Apple ID…');try{const a=await api('/api/login',{method:'POST',body:{appleId:$('#appleId').value,password:$('#password').value,code}});$('#password').value='';setTwoFactorMode(false);showStatus('登录成功：'+a.appleId,'good');refresh()}catch(err){if(/双重|验证码|安全码|two[ -]?factor|verification code/i.test(err.message)){setTwoFactorMode(true);showStatus('Apple 需要双重认证，请输入 6 位验证码后继续登录','warn');setTimeout(()=>{$('#code').focus();$('#twoFactorRow').scrollIntoView({behavior:'smooth',block:'center'})},80)}else{showStatus(err.message,'error')}}});\n";
+    if (source.indexOf(oldHandler) >= 0) source = source.replace(oldHandler, newHandler);
+    if (source.indexOf('id="appleId" type="text"') < 0 || source.indexOf('id="twoFactorRow"') < 0 || source.indexOf("setTwoFactorMode") < 0) throw new Error("登录界面热修复未能应用，请更新或重新安装插件");
+    return source;
   }
 
   function mappedRequest() {
@@ -143,7 +152,8 @@
         $notification.post("IPA 工具箱增强版", "控制面板", "点击通知打开控制面板。", { openUrl: PANEL_URL });
         return $done();
       }
-      var source = readKey(CACHE_KEY) || readKey(LEGACY_CACHE_KEY);
+      var source = readKey(CACHE_KEY);
+      for (var i = 0; !valid(source) && i < LEGACY_CACHE_KEYS.length; i += 1) source = readKey(LEGACY_CACHE_KEYS[i]);
       if (!valid(source)) source = await fetchCompressed();
       run(source);
     } catch (error) { fail(error); }
