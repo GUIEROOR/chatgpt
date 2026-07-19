@@ -1,0 +1,67 @@
+adata") {
+      var metadataId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(metadataId)) throw new Error("App ID 无效");
+      var metadataInfo = await getAppInfo(state, metadataId, parsed.query.version || "");
+      return send(200, metadataInfo.metadataPlist, {
+        "Content-Type": "application/x-plist; charset=utf-8",
+        "Content-Disposition": "attachment; filename=\"iTunesMetadata.plist\""
+      });
+    }
+
+    if (method === "GET" && path === "/api/sinf") {
+      var sinfId = String(parsed.query.id || "");
+      if (!/^\d+$/.test(sinfId)) throw new Error("App ID 无效");
+      var sinfInfo = await getAppInfo(state, sinfId, parsed.query.version || "");
+      if (!sinfInfo.sinfBase64) throw new Error("Apple 未返回 sinf 数据");
+      return send(200, base64ToBytes(sinfInfo.sinfBase64), {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": "attachment; filename=\"" + String(sinfInfo.bundleId || "app") + ".sinf\""
+      });
+    }
+
+    if (method === "GET" && path === "/api/diagnostics") {
+      return sendJson(200, ok(await runDiagnostics(state)));
+    }
+
+    if (method === "GET" && path === "/api/state/export") {
+      var exported = JSON.parse(JSON.stringify(state));
+      Object.keys(exported.accounts || {}).forEach(function (key) {
+        delete exported.accounts[key].Cookie;
+        delete exported.accounts[key].passwordToken;
+        delete exported.accounts[key].dsPersonId;
+        delete exported.accounts[key].legacyPassword;
+      });
+      delete exported.localToken;
+      return sendJson(200, ok(exported));
+    }
+
+    var notFound = new Error("本地 API 未实现：" + method + " " + path);
+    notFound.status = 404;
+    throw notFound;
+  }
+
+  async function main() {
+    if (typeof $request === "undefined") {
+      $notification.post(
+        "IPA 工具箱增强版",
+        "本地面板",
+        "请确保插件已启用，然后点击通知打开控制面板。",
+        { openUrl: BASE_ORIGIN + "/" }
+      );
+      return $done();
+    }
+    try {
+      await route();
+    } catch (error) {
+      log(error && error.stack || error);
+      var status = error && error.status || 500;
+      var parsed = parseUrl($request.url || "");
+      if (parsed.host === "apple-api.com" || parsed.host === "www.apple-api.com") {
+        return sendCompatibilityJson(status, compatibilityResponse(false, null, error && error.message ? error.message : String(error)));
+      }
+      sendJson(status, fail(error));
+    }
+  }
+
+  main();
+})();
