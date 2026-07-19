@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.1 - 2026-07-19
+
+- 修复 `ipa-tool.local` 在 iOS/Loon 中可能被 `*.local` bypass-tun 或 mDNS 绕过，导致面板打不开的问题。
+- 面板入口迁移到 `https://apple-api.com/ipa-tool`，复用原版插件已配置的 MitM 域名。
+- 保留 `/auth/*` 与 `/apps/*` 原版 API 路由；面板内部 `/api/*` 由启动器映射到本地控制路由，互不冲突。
+- 启动器缓存版本升级为 2.0.1，并兼容迁移已有 2.0.0 本地核心缓存。
+- 手动运行脚本时的通知链接同步改为新面板地址。
+
 ## 2.0.0 - 2026-07-19
 
 - 合并独立 Loon 本地面板与原版 `apple-api.com`、`xiaobai.app` 兼容层。
